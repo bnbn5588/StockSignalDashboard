@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { computeStreaks, currentStreak, SIG_COLORS, type AllData, type Row } from '@/lib/analytics';
 import PnLChart from './PnLChart';
+import TradeLog from './TradeLog';
 import InfoTooltip from './InfoTooltip';
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
@@ -412,6 +413,9 @@ export default function TickerSection({ allData }: { allData: AllData }) {
 
       {/* Priority 2: Simulated P&L */}
       <PnLChart rows={rows} />
+
+      {/* Trade performance log */}
+      <TradeLog rows={rows} />
     </div>
   );
 }

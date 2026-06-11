@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import { parseCSV, latestDataDate, type AllData } from '@/lib/analytics';
 import SnapshotTable from './SnapshotTable';
+import ConsensusGauge from './ConsensusGauge';
 import TickerSection from './TickerSection';
 import HeatmapGrid from './HeatmapGrid';
+import PortfolioChart from './PortfolioChart';
 import NormalizedChart from './NormalizedChart';
 import InfoTooltip from './InfoTooltip';
 
@@ -88,24 +90,32 @@ export default function Dashboard() {
         &nbsp;·&nbsp;{tickerCount} tickers&nbsp;·&nbsp;refreshes every 5 min
       </div>
 
-      {/* ── Priority 1 + 6: Snapshot table + alerts ─────────────────────────── */}
+      {/* ── Snapshot + market pulse ──────────────────────────────────────────── */}
       <SnapshotTable allData={allData} />
+      <ConsensusGauge allData={allData} />
 
-      {/* ── Priority 2 + 4 + 5: Ticker deep-dive ───────────────────────────── */}
+      {/* ── Ticker deep-dive ─────────────────────────────────────────────────── */}
       <Divider
         title="Ticker deep-dive"
-        info="Select a ticker to see its full price history with signal overlays, monthly distribution, confidence trend, and a simulated P&L curve."
+        info="Select a ticker to see its full price history with signal overlays, monthly distribution, confidence trend, simulated P&L, and a trade-by-trade performance log."
       />
       <TickerSection allData={allData} />
 
-      {/* ── Priority 3: Cross-ticker heatmap ────────────────────────────────── */}
+      {/* ── Cross-ticker heatmap ─────────────────────────────────────────────── */}
       <Divider
         title="Market heatmap — dominant signal per month"
         info="Each cell shows the most common signal for that ticker in that calendar month: B = BUY (green), S = SELL (red), H = HOLD (gray). Scan rows for persistent trends and columns for market-wide regime shifts."
       />
       <HeatmapGrid allData={allData} />
 
-      {/* ── Priority 7: Normalized comparison ───────────────────────────────── */}
+      {/* ── Portfolio simulation ─────────────────────────────────────────────── */}
+      <Divider
+        title="Portfolio simulation — equal weight"
+        info="Combines all tickers into one equal-weight portfolio. Each ticker follows its own signals; returns are averaged across all of them. Shows whether the strategy adds value at the portfolio level, not just per stock."
+      />
+      <PortfolioChart allData={allData} />
+
+      {/* ── Relative performance ─────────────────────────────────────────────── */}
       <Divider
         title="Relative performance — indexed to 100"
         info="Every ticker is rebased to 100 at its own first data point, so lines with different price scales can be compared directly. A line at 150 means the price is up 50 % from its starting date. Use the chips above the chart to show or hide individual tickers."

@@ -238,3 +238,181 @@ export function allUniqueDates(allData: AllData): string[] {
   for (const rows of Object.values(allData)) rows.forEach(r => s.add(r.date));
   return Array.from(s).sort();
 }
+
+// ── Trade log ─────────────────────────────────────────────────────────────────
+
+export interface Trade {
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  returnPct: number;
+  durationDays: number; // trading-day count (index diff), not calendar days
+}
+
+/** Every completed BUY→SELL round trip, chronological order. */
+export function computeTrades(rows: Row[]): Trade[] {
+  const trades: Trade[] = [];
+  let entryIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].signal === 'BUY' && entryIdx === -1) {
+      entryIdx = i;
+    } else if (rows[i].signal === 'SELL' && entryIdx !== -1) {
+      trades.push({
+        entryDate: rows[entryIdx].date,
+        exitDate: rows[i].date,
+        entryPrice: rows[entryIdx].price,
+        exitPrice: rows[i].price,
+        returnPct: ((rows[i].price - rows[entryIdx].price) / rows[entryIdx].price) * 100,
+        durationDays: i - entryIdx,
+      });
+      entryIdx = -1;
+    }
+  }
+  return trades;
+}
+
+export interface TradeStats {
+  totalTrades: number;
+  winRate: number;      // 0–100
+  avgWin: number;       // avg return % on winning trades
+  avgLoss: number;      // avg return % on losing trades (negative)
+  expectancy: number;   // weighted avg return per trade
+  maxDrawdown: number;  // max peak-to-trough % drop in strategy equity
+  avgDuration: number;  // avg trading days per completed trade
+  openEntry: {
+    entryDate: string;
+    entryPrice: number;
+    unrealizedPct: number;
+    durationDays: number;
+  } | null;
+}
+
+export function tradeStats(rows: Row[]): TradeStats {
+  const trades = computeTrades(rows);
+  const pnl = simulatePnL(rows);
+
+  let peak = 0, maxDD = 0;
+  for (const p of pnl) {
+    if (p.strategy > peak) peak = p.strategy;
+    const dd = peak - p.strategy;
+    if (dd > maxDD) maxDD = dd;
+  }
+
+  const wins = trades.filter(t => t.returnPct > 0);
+  const losses = trades.filter(t => t.returnPct <= 0);
+  const winRate = trades.length ? (wins.length / trades.length) * 100 : 0;
+  const avgWin = wins.length ? wins.reduce((s, t) => s + t.returnPct, 0) / wins.length : 0;
+  const avgLoss = losses.length ? losses.reduce((s, t) => s + t.returnPct, 0) / losses.length : 0;
+  const expectancy = (winRate / 100) * avgWin + (1 - winRate / 100) * avgLoss;
+  const avgDuration = trades.length ? trades.reduce((s, t) => s + t.durationDays, 0) / trades.length : 0;
+
+  // Detect open position: last BUY without a subsequent SELL
+  let openEntryIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].signal === 'BUY') openEntryIdx = i;
+    else if (rows[i].signal === 'SELL') openEntryIdx = -1;
+  }
+  let openEntry: TradeStats['openEntry'] = null;
+  if (openEntryIdx >= 0) {
+    const e = rows[openEntryIdx];
+    const last = rows.at(-1)!;
+    openEntry = {
+      entryDate: e.date,
+      entryPrice: e.price,
+      unrealizedPct: ((last.price - e.price) / e.price) * 100,
+      durationDays: rows.length - 1 - openEntryIdx,
+    };
+  }
+
+  return { totalTrades: trades.length, winRate, avgWin, avgLoss, expectancy, maxDrawdown: maxDD, avgDuration, openEntry };
+}
+
+// ── Market consensus ──────────────────────────────────────────────────────────
+
+/** Count of tickers currently on each signal (latest row per ticker). */
+export function marketConsensus(allData: AllData): Record<string, number> {
+  const counts: Record<string, number> = { BUY: 0, SELL: 0, HOLD: 0 };
+  for (const rows of Object.values(allData)) {
+    const sig = rows.at(-1)?.signal;
+    if (sig && sig in counts) counts[sig]++;
+  }
+  return counts;
+}
+
+// ── Forward returns ───────────────────────────────────────────────────────────
+
+export interface ForwardReturn { avg: number; count: number; }
+
+/**
+ * For each signal type, what was the average next-trading-day price change?
+ * Aggregated across all tickers — the larger the n, the more reliable the avg.
+ */
+export function aggregateForwardReturns(allData: AllData): Record<string, ForwardReturn> {
+  const sums: Record<string, number> = { BUY: 0, SELL: 0, HOLD: 0 };
+  const counts: Record<string, number> = { BUY: 0, SELL: 0, HOLD: 0 };
+  for (const rows of Object.values(allData)) {
+    for (let i = 0; i < rows.length - 1; i++) {
+      const sig = rows[i].signal;
+      if (sig in sums) {
+        sums[sig] += ((rows[i + 1].price - rows[i].price) / rows[i].price) * 100;
+        counts[sig]++;
+      }
+    }
+  }
+  return Object.fromEntries(
+    ['BUY', 'SELL', 'HOLD'].map(sig => [
+      sig,
+      { avg: counts[sig] ? sums[sig] / counts[sig] : 0, count: counts[sig] },
+    ])
+  );
+}
+
+// ── Portfolio simulation ──────────────────────────────────────────────────────
+
+/**
+ * Equal-weight portfolio: averages each ticker's signal-strategy and
+ * buy-and-hold % returns across all dates. Each ticker is included from its
+ * own first data date onward; missing dates are forward-filled.
+ */
+export function portfolioSimulation(allData: AllData): PnLPoint[] {
+  const tickers = Object.keys(allData);
+  if (!tickers.length) return [];
+
+  const stratMaps: Map<string, number>[] = [];
+  const bahMaps: Map<string, number>[] = [];
+  const firstDates: string[] = [];
+
+  for (const ticker of tickers) {
+    const sm = new Map<string, number>();
+    const bm = new Map<string, number>();
+    for (const p of simulatePnL(allData[ticker])) {
+      sm.set(p.date, p.strategy);
+      bm.set(p.date, p.bah);
+    }
+    stratMaps.push(sm);
+    bahMaps.push(bm);
+    firstDates.push(allData[ticker][0]?.date ?? '9999-12-31');
+  }
+
+  const dates = allUniqueDates(allData);
+  const lastStrat = new Array(tickers.length).fill(0) as number[];
+  const lastBah   = new Array(tickers.length).fill(0) as number[];
+  const result: PnLPoint[] = [];
+
+  for (const date of dates) {
+    let sumS = 0, sumB = 0, count = 0;
+    for (let i = 0; i < tickers.length; i++) {
+      if (date < firstDates[i]) continue;
+      count++;
+      if (stratMaps[i].has(date)) {
+        lastStrat[i] = stratMaps[i].get(date)!;
+        lastBah[i]   = bahMaps[i].get(date)!;
+      }
+      sumS += lastStrat[i];
+      sumB += lastBah[i];
+    }
+    if (count) result.push({ date, strategy: sumS / count, bah: sumB / count });
+  }
+  return result;
+}
