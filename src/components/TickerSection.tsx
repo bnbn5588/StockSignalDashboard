@@ -37,6 +37,7 @@ export default function TickerSection({ allData }: { allData: AllData }) {
   const tickers = useMemo(() => Object.keys(allData).sort(), [allData]);
   const defaultTicker = tickers.includes('AAPL') ? 'AAPL' : (tickers[0] ?? 'AAPL');
   const [ticker, setTicker] = useState(defaultTicker);
+  const [confMode, setConfMode] = useState<'streak' | 'api'>('streak');
 
   // Keep selection valid if tickers list changes
   const safeTicker = allData[ticker] ? ticker : (tickers[0] ?? ticker);
@@ -244,15 +245,19 @@ export default function TickerSection({ allData }: { allData: AllData }) {
         },
       });
 
-      // ── Priority 4: Confidence (streak length) over time ───────────────────
+      // ── Priority 4: Confidence over time (streak or API %) ────────────────
+      const confData = confMode === 'streak'
+        ? streaks
+        : rows.map(r => r.confidence);
+
       confChart.current = new Chart(confRef.current, {
         type: 'bar',
         data: {
           labels,
           datasets: [
             {
-              label: 'Streak (days)',
-              data: streaks,
+              label: confMode === 'streak' ? 'Streak (days)' : 'API Confidence (%)',
+              data: confData,
               backgroundColor: rows.map(r => SIG_COLORS[r.signal] + 'AA'),
               borderColor: rows.map(r => SIG_COLORS[r.signal]),
               borderWidth: 0,
@@ -276,8 +281,12 @@ export default function TickerSection({ allData }: { allData: AllData }) {
             tooltip: {
               callbacks: {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                label: (ctx: any) =>
-                  ` ${rows[ctx.dataIndex as number].signal} × ${ctx.parsed.y as number}d streak`,
+                label: (ctx: any) => {
+                  const r = rows[ctx.dataIndex as number];
+                  return confMode === 'streak'
+                    ? ` ${r.signal} × ${ctx.parsed.y as number}d streak`
+                    : ` ${r.signal} · ${(ctx.parsed.y as number).toFixed(1)}%${r.strength ? ` (${r.strength})` : ''}`;
+                },
               },
             },
           },
@@ -287,7 +296,14 @@ export default function TickerSection({ allData }: { allData: AllData }) {
               grid: { display: false },
             },
             y: {
-              ticks: { font: { size: 11 } },
+              ...(confMode === 'api' ? { min: 0, max: 100 } : {}),
+              ticks: {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                callback: (v: any) => confMode === 'api'
+                  ? Number(v).toFixed(0) + '%'
+                  : Number(v),
+                font: { size: 11 },
+              },
               grid: { color: 'rgba(128,128,128,0.1)' },
             },
           },
@@ -304,7 +320,7 @@ export default function TickerSection({ allData }: { allData: AllData }) {
       barChart.current = null;
       confChart.current = null;
     };
-  }, [rows]);
+  }, [rows, confMode]);
 
   // ── KPI values ──────────────────────────────────────────────────────────────
 
@@ -402,11 +418,44 @@ export default function TickerSection({ allData }: { allData: AllData }) {
 
       {/* Priority 4: Confidence / streak-length history */}
       <div style={{ marginTop: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 0 }}>
-          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Confidence over time</span>
-          <InfoTooltip text="Bar height = number of consecutive days the algorithm has been on the same signal at that point in time. A tall green bar means many consecutive BUY days — the algorithm has high conviction. Colour matches the signal direction. Resets to 1 every time the signal changes." />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Confidence over time</span>
+            <InfoTooltip text="Two views — toggle between them. Streak: bar height = consecutive days the algorithm has held the same signal; resets to 1 on every signal change. API %: bar height = the confidence score (0–100%) returned by the analysis API for that day — the algorithm's own certainty measure. The bot sends urgent alerts when confidence ≥ 70%." />
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['streak', 'api'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setConfMode(mode)}
+                style={{
+                  padding: '2px 10px',
+                  fontSize: 11,
+                  borderRadius: 5,
+                  border: '1px solid var(--border-color)',
+                  background: confMode === mode ? 'var(--text-secondary)' : 'transparent',
+                  color: confMode === mode ? 'var(--bg-primary)' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontWeight: confMode === mode ? 600 : 400,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {mode === 'streak' ? 'Streak ×d' : 'API %'}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ position: 'relative', width: '100%', height: 100 }}>
+        {confMode === 'api' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
+            <span style={{ fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              urgent alert threshold
+            </span>
+            <div style={{ flex: 1, height: 1, borderTop: '1px dashed #D85A3088' }} />
+            <span style={{ fontSize: 10, color: SIG_COLORS.SELL, fontWeight: 600 }}>70%</span>
+          </div>
+        )}
+        <div style={{ position: 'relative', width: '100%', height: 120 }}>
           <canvas ref={confRef} />
         </div>
       </div>

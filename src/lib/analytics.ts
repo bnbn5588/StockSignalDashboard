@@ -1,6 +1,13 @@
 // ── Shared types ──────────────────────────────────────────────────────────────
 
-export type Row = { date: string; signal: string; price: number };
+export type Row = {
+  date: string;
+  signal: string;
+  price: number;
+  strength: string;    // col 3: Weak | Moderate | Strong | Insufficient
+  confidence: number;  // col 4: 0–100 numeric (API's own certainty score)
+  adx: number;         // col 5: ADX value extracted from "Strong (ADX: 60.63)"
+};
 export type AllData = Record<string, Row[]>;
 
 export const SIG_COLORS: Record<string, string> = {
@@ -12,11 +19,14 @@ export const SIG_COLORS: Record<string, string> = {
 // ── CSV parsing ───────────────────────────────────────────────────────────────
 //
 // Sheet format (7 columns, no header row):
-//   "2025-10-19 8:00:07","AAPL","BUY","","0","","$252.29"
+//   "2025-10-19 8:00:07","AAPL","BUY","Weak","47.4","Strong (ADX: 60.63)","$252.29"
 //
 // Col 0 = bot-run timestamp → YYYY-MM-DD (first 10 chars)
 // Col 1 = ticker
-// Col 2 = signal
+// Col 2 = signal (BUY | SELL | HOLD)
+// Col 3 = strength (Weak | Moderate | Strong | Insufficient)
+// Col 4 = confidence % (numeric string, e.g. "47.4")
+// Col 5 = trend strength string (e.g. "Strong (ADX: 60.63)")
 // Col 6 = price with $-prefix
 //
 // The bot runs daily so the same trading-day row appears multiple times;
@@ -44,10 +54,14 @@ export function parseCSV(csv: string): AllData {
     const p = splitCSVLine(line);
     if (p.length < 7) continue;
 
-    const date = p[0].trim().slice(0, 10);
-    const ticker = p[1].trim();
-    const signal = p[2].trim();
-    const price = parseFloat(p[6].trim().replace(/[$,]/g, ''));
+    const date       = p[0].trim().slice(0, 10);
+    const ticker     = p[1].trim();
+    const signal     = p[2].trim();
+    const strength   = p[3].trim();
+    const confidence = parseFloat(p[4].trim()) || 0;
+    const adxMatch   = p[5].trim().match(/ADX:\s*([\d.]+)/);
+    const adx        = adxMatch ? parseFloat(adxMatch[1]) : 0;
+    const price      = parseFloat(p[6].trim().replace(/[$,]/g, ''));
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     if (!ticker || !signal || isNaN(price) || price <= 0) continue;
@@ -56,7 +70,7 @@ export function parseCSV(csv: string): AllData {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    (data[ticker] ??= []).push({ date, signal, price });
+    (data[ticker] ??= []).push({ date, signal, price, strength, confidence, adx });
   }
 
   for (const rows of Object.values(data)) {
