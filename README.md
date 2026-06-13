@@ -11,7 +11,8 @@ A live Next.js dashboard that reads buy/sell/hold signals from a public Google S
 | **Today's snapshot** | Latest signal, price, day change, period return, and streak for every ticker |
 | **High-confidence alerts** | Chips for tickers on a streak of 5+ consecutive same-signal days |
 | **Market pulse** | Current BUY/SELL/HOLD split across all tickers + avg next-day return per signal type (historical) |
-| **Ticker deep-dive** | Price chart with signal markers sized by streak, monthly signal distribution, confidence-over-time bar chart |
+| **AI Analysis** | Claude-generated market summary, top picks, and risk watch — cached for 24 hours, regenerated once after the daily sheet update |
+| **Ticker deep-dive** | Price chart with signal markers sized by streak, monthly signal distribution, confidence-over-time bar chart (streak mode or API % mode) |
 | **Simulated P&L** | $10k strategy (follow BUY/SELL signals) vs buy-and-hold, per ticker |
 | **Trade performance** | Win rate, avg win/loss, expectancy, max drawdown, avg hold duration, open position banner, full trade log table |
 | **Market heatmap** | Dominant signal per ticker per month — spot macro regime shifts at a glance |
@@ -72,7 +73,9 @@ The sheet named `history` must be **publicly shared** ("Anyone with the link can
 | 0 | Bot-run timestamp | `2025-10-19 8:00:07` |
 | 1 | Ticker symbol | `AAPL` |
 | 2 | Signal | `BUY` / `SELL` / `HOLD` |
-| 3–5 | *(unused)* | |
+| 3 | Signal strength | `Weak` / `Moderate` / `Strong` / `Insufficient` |
+| 4 | Confidence % | `47.4` |
+| 5 | Trend strength string | `Strong (ADX: 60.63)` |
 | 6 | Price with `$` prefix | `$252.29` |
 
 Rows are comma-separated and quoted. The bot can write the same trading day multiple times — duplicates are deduplicated automatically by `(date, ticker)` key.
@@ -84,8 +87,11 @@ Rows are comma-separated and quoted. The bot can write the same trading day mult
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `SHEET_ID` | No | value in `.env` | Google Spreadsheet ID from the share URL |
+| `ANTHROPIC_API_KEY` | Yes (for AI Analysis) | *(empty)* | Anthropic API key — get yours at [console.anthropic.com](https://console.anthropic.com/) |
 
-Create `.env.local` for local overrides — it is gitignored and takes precedence over `.env`. For Vercel, set `SHEET_ID` in the dashboard under **Settings → Environment Variables**.
+Create `.env.local` for local overrides — it is gitignored and takes precedence over `.env`. For Vercel, set both variables in the dashboard under **Settings → Environment Variables**.
+
+> **Without `ANTHROPIC_API_KEY`** the rest of the dashboard works normally — the AI Analysis section displays a "Claude AI unavailable" message instead of insights.
 
 ---
 
@@ -98,6 +104,7 @@ src/
     layout.tsx                # Viewport meta, global font
     globals.css               # CSS variables (light/dark), canvas touch-action
     api/sheet-data/route.ts   # Proxy API: fetches & caches the Google Sheet CSV
+    api/ai-analysis/route.ts  # Claude AI: builds prompt from sheet data, calls claude-opus-4-8
   components/
     Dashboard.tsx             # Orchestrator: fetch, parse, layout
     SnapshotTable.tsx         # Today's snapshot table + high-confidence alerts
@@ -109,6 +116,7 @@ src/
     PortfolioChart.tsx        # Equal-weight portfolio simulation chart
     NormalizedChart.tsx       # Relative performance chart with ticker toggles
     InfoTooltip.tsx           # Hover/tap info button used throughout
+    AIInsights.tsx            # Claude AI analysis card (market summary, picks, risk watch)
   lib/
     analytics.ts              # All pure data functions (no React), fully typed
 ```

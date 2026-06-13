@@ -9,6 +9,7 @@ import HeatmapGrid from './HeatmapGrid';
 import PortfolioChart from './PortfolioChart';
 import NormalizedChart from './NormalizedChart';
 import InfoTooltip from './InfoTooltip';
+import AIInsights from './AIInsights';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +94,13 @@ export default function Dashboard() {
       {/* ── Snapshot + market pulse ──────────────────────────────────────────── */}
       <SnapshotTable allData={allData} />
       <ConsensusGauge allData={allData} />
+
+      {/* ── Claude AI analysis ───────────────────────────────────────────────── */}
+      <Divider
+        title="AI Analysis — Claude"
+        info="A Claude-powered summary generated from the daily signal snapshot. Cached for 24 hours — Claude is called once per day, after the sheet updates at 08:00 AM. Not financial advice."
+      />
+      <AIInsights />
 
       {/* ── Ticker deep-dive ─────────────────────────────────────────────────── */}
       <Divider
