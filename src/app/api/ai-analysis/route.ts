@@ -11,13 +11,20 @@ export const revalidate = 86400; // re-run at most once per day — sheet update
 export const maxDuration = 60;
 
 export async function GET() {
-  // Skip Claude on weekends — market is closed and the sheet doesn't update
+  // Skip Claude on weekends — market is closed and the sheet doesn't update.
+  // Use a short cache (4 h) so the response expires before the next trading day,
+  // instead of inheriting the full 24-hour ISR window.
   const day = new Date().getDay(); // 0 = Sun, 1 = Mon
   if (day === 0 || day === 1) {
-    return Response.json({
-      weekend: true,
-      generatedAt: new Date().toISOString().slice(0, 10),
-    });
+    return new Response(
+      JSON.stringify({ weekend: true, generatedAt: new Date().toISOString().slice(0, 10), revalidate: 14400 }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 's-maxage=14400', // 4 hours
+        },
+      }
+    );
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -123,7 +130,7 @@ Rules:
       throw new Error("Could not extract JSON from Claude response");
     const analysis = JSON.parse(jsonMatch[0]);
 
-    return Response.json({ ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt });
+    return Response.json({ ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt, revalidate: 86400 });
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },
