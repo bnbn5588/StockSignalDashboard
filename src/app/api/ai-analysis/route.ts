@@ -9,75 +9,73 @@ import {
   portfolioSimulation,
 } from "@/lib/analytics";
 
-export const dynamic = "force-dynamic"; // handler always runs; caching done via unstable_cache
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// Wraps the heavy Claude call in Next.js Data Cache.
-// Key includes today's date → cache auto-resets each new day.
-// Tag 'ai-analysis' → busted by the /invalidate endpoint on manual refresh.
-function buildDailyCache() {
-  const today = new Date().toISOString().slice(0, 10);
+// Defined at MODULE LEVEL so the function reference is stable across requests.
+// Next.js unstable_cache uses the key array PLUS any function arguments for the
+// cache lookup, so passing `date` as an arg gives us one cache entry per day —
+// without relying on a new wrapper being created on every request.
+const runClaudeAnalysis = unstable_cache(
+  async (date: string) => {
+    const sheetId = process.env.SHEET_ID;
+    const csvUrl  = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=history`;
+    const csvRes  = await fetch(csvUrl, { cache: "no-store" });
+    if (!csvRes.ok) throw new Error(`Sheet fetch HTTP ${csvRes.status}`);
+    const csv = await csvRes.text();
 
-  return unstable_cache(
-    async () => {
-      const sheetId = process.env.SHEET_ID;
-      const csvUrl  = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=history`;
-      const csvRes  = await fetch(csvUrl, { cache: "no-store" });
-      if (!csvRes.ok) throw new Error(`Sheet fetch HTTP ${csvRes.status}`);
-      const csv = await csvRes.text();
+    const allData = parseCSV(csv);
+    const tickers = Object.keys(allData);
+    if (!tickers.length) throw new Error("No data parsed from sheet");
 
-      const allData = parseCSV(csv);
-      const tickers = Object.keys(allData);
-      if (!tickers.length) throw new Error("No data parsed from sheet");
+    const snapshot  = latestSnapshot(allData);
+    const consensus = marketConsensus(allData);
+    const fwd       = aggregateForwardReturns(allData);
 
-      const snapshot  = latestSnapshot(allData);
-      const consensus = marketConsensus(allData);
-      const fwd       = aggregateForwardReturns(allData);
-
-      // Signal changes since the previous trading day
-      const signalChanges: string[] = [];
-      for (const r of snapshot) {
-        const rows = allData[r.ticker];
-        const last = rows.at(-1);
-        const prev = rows.at(-2);
-        if (last && prev && last.signal !== prev.signal) {
-          signalChanges.push(`${r.ticker}: ${prev.signal}→${last.signal}`);
-        }
+    // Signal changes since the previous trading day
+    const signalChanges: string[] = [];
+    for (const r of snapshot) {
+      const rows = allData[r.ticker];
+      const last = rows.at(-1);
+      const prev = rows.at(-2);
+      if (last && prev && last.signal !== prev.signal) {
+        signalChanges.push(`${r.ticker}: ${prev.signal}→${last.signal}`);
       }
+    }
 
-      // Portfolio-level P&L
-      const portSim  = portfolioSimulation(allData);
-      const portLast = portSim.at(-1);
-      const portLine = portLast
-        ? `Strategy ${portLast.strategy >= 0 ? "+" : ""}${portLast.strategy.toFixed(1)}% vs buy-and-hold ${portLast.bah >= 0 ? "+" : ""}${portLast.bah.toFixed(1)}% (equal-weight across all tickers)`
-        : "Portfolio simulation unavailable";
+    // Portfolio-level P&L
+    const portSim  = portfolioSimulation(allData);
+    const portLast = portSim.at(-1);
+    const portLine = portLast
+      ? `Strategy ${portLast.strategy >= 0 ? "+" : ""}${portLast.strategy.toFixed(1)}% vs buy-and-hold ${portLast.bah >= 0 ? "+" : ""}${portLast.bah.toFixed(1)}% (equal-weight across all tickers)`
+      : "Portfolio simulation unavailable";
 
-      // Snapshot table for the prompt
-      const snapshotLines = snapshot.map((r) => {
-        const rows  = allData[r.ticker];
-        const last  = rows.at(-1)!;
-        const stats = tradeStats(rows);
-        const perf  = stats.totalTrades
-          ? `wr=${Math.round(stats.winRate)}% exp=${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(1)}%`
-          : "no_completed_trades";
-        return [
-          r.ticker.padEnd(5),
-          r.signal.padEnd(4),
-          `$${r.price.toFixed(2).padStart(8)}`,
-          `streak=${r.streak.signal}×${r.streak.days}d`.padEnd(14),
-          `period=${(r.periodChangePct >= 0 ? "+" : "") + r.periodChangePct.toFixed(1) + "%"}`.padEnd(14),
-          `conf=${last.confidence.toFixed(0).padStart(3)}`,
-          `adx=${last.adx.toFixed(0).padStart(3)}`,
-          perf,
-        ].join(" | ");
-      }).join("\n");
+    // Snapshot table for the prompt
+    const snapshotLines = snapshot.map((r) => {
+      const rows  = allData[r.ticker];
+      const last  = rows.at(-1)!;
+      const stats = tradeStats(rows);
+      const perf  = stats.totalTrades
+        ? `wr=${Math.round(stats.winRate)}% exp=${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(1)}%`
+        : "no_completed_trades";
+      return [
+        r.ticker.padEnd(5),
+        r.signal.padEnd(4),
+        `$${r.price.toFixed(2).padStart(8)}`,
+        `streak=${r.streak.signal}×${r.streak.days}d`.padEnd(14),
+        `period=${(r.periodChangePct >= 0 ? "+" : "") + r.periodChangePct.toFixed(1) + "%"}`.padEnd(14),
+        `conf=${last.confidence.toFixed(0).padStart(3)}`,
+        `adx=${last.adx.toFixed(0).padStart(3)}`,
+        perf,
+      ].join(" | ");
+    }).join("\n");
 
-      const fwdLine =
-        `BUY: ${fwd.BUY.avg >= 0 ? "+" : ""}${fwd.BUY.avg.toFixed(3)}% (n=${fwd.BUY.count}) | ` +
-        `SELL: ${fwd.SELL.avg >= 0 ? "+" : ""}${fwd.SELL.avg.toFixed(3)}% (n=${fwd.SELL.count}) | ` +
-        `HOLD: ${fwd.HOLD.avg >= 0 ? "+" : ""}${fwd.HOLD.avg.toFixed(3)}% (n=${fwd.HOLD.count})`;
+    const fwdLine =
+      `BUY: ${fwd.BUY.avg >= 0 ? "+" : ""}${fwd.BUY.avg.toFixed(3)}% (n=${fwd.BUY.count}) | ` +
+      `SELL: ${fwd.SELL.avg >= 0 ? "+" : ""}${fwd.SELL.avg.toFixed(3)}% (n=${fwd.SELL.count}) | ` +
+      `HOLD: ${fwd.HOLD.avg >= 0 ? "+" : ""}${fwd.HOLD.avg.toFixed(3)}% (n=${fwd.HOLD.count})`;
 
-      const prompt = `You are reviewing algorithmic stock signals generated by a systematic trading bot. Today is ${today}.
+    const prompt = `You are reviewing algorithmic stock signals generated by a systematic trading bot. Today is ${date}.
 
 Portfolio: ${tickers.length} tickers | BUY: ${consensus.BUY} | SELL: ${consensus.SELL} | HOLD: ${consensus.HOLD}
 ${signalChanges.length ? `Signal changes since yesterday: ${signalChanges.join(", ")}` : "No signal changes since yesterday."}
@@ -93,7 +91,7 @@ ${fwdLine}
 
 Respond with ONLY this JSON object (no markdown fences, no text outside the JSON):
 {
-  "generatedAt": "${today}",
+  "generatedAt": "${date}",
   "marketSummary": "2-3 sentences on the overall signal environment — reference the BUY/SELL/HOLD split, whether the strategy is beating buy-and-hold, and any notable signal changes today",
   "topPicks": [{"ticker": "TICK", "reason": "specific, data-backed reason in one sentence"}],
   "riskWatch": [{"ticker": "TICK", "reason": "specific, data-backed concern in one sentence"}],
@@ -107,29 +105,30 @@ Rules:
 - Be specific: cite actual ticker names, streak lengths, confidence scores, or % figures.
 - Do not invent data not present above.`;
 
-      const client  = new Anthropic();
-      const message = await client.messages.create({
-        model: "claude-opus-4-8",
-        max_tokens: 4096,
-        thinking: { type: "adaptive" },
-        messages: [{ role: "user", content: prompt }],
-      });
+    const client  = new Anthropic();
+    const message = await client.messages.create({
+      model: "claude-opus-4-8",
+      max_tokens: 4096,
+      thinking: { type: "adaptive" },
+      messages: [{ role: "user", content: prompt }],
+    });
 
-      const textBlock = message.content.find(
-        (b): b is Anthropic.TextBlock => b.type === "text"
-      );
-      if (!textBlock) throw new Error("No text block in Claude response");
+    const textBlock = message.content.find(
+      (b): b is Anthropic.TextBlock => b.type === "text"
+    );
+    if (!textBlock) throw new Error("No text block in Claude response");
 
-      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Could not extract JSON from Claude response");
-      const analysis = JSON.parse(jsonMatch[0]);
+    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Could not extract JSON from Claude response");
+    const analysis = JSON.parse(jsonMatch[0]);
 
-      return { ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt };
-    },
-    ["ai-analysis", today],   // date in key → auto-resets every day
-    { tags: ["ai-analysis"] } // tag → bustable via revalidateTag
-  );
-}
+    return { ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt };
+  },
+  ["ai-analysis"]
+  // No tags — this cache is intentionally not bustable mid-day.
+  // Passing `date` as an argument (see GET below) gives one entry per day;
+  // the entry auto-resets when the date changes at UTC midnight.
+);
 
 export async function GET() {
   // Weekend: no market activity, no sheet update
@@ -146,7 +145,10 @@ export async function GET() {
   }
 
   try {
-    const analysis = await buildDailyCache()();
+    // The date arg is appended to the cache key by unstable_cache.
+    // Same date → same cache entry → Claude called exactly once per UTC day.
+    const today = new Date().toISOString().slice(0, 10);
+    const analysis = await runClaudeAnalysis(today);
     return Response.json(analysis);
   } catch (err) {
     return Response.json(

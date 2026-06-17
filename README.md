@@ -11,7 +11,7 @@ A live Next.js dashboard that reads buy/sell/hold signals from a public Google S
 | **Today's snapshot** | Latest signal, price, day change, period return, and streak for every ticker |
 | **High-confidence alerts** | Chips for tickers on a streak of 5+ consecutive same-signal days |
 | **Market pulse** | Current BUY/SELL/HOLD split across all tickers + avg next-day return per signal type (historical) |
-| **AI Analysis** | Claude-generated market summary, top picks, and risk watch — cached for 24 hours, regenerated once after the daily sheet update |
+| **AI Analysis** | Claude-generated market summary, top picks, and risk watch — generated once per day after 08:30 AM, shared across all visitors via server-side cache |
 | **Ticker deep-dive** | Price chart with signal markers sized by streak, monthly signal distribution, confidence-over-time bar chart (streak mode or API % mode) |
 | **Simulated P&L** | $10k strategy (follow BUY/SELL signals) vs buy-and-hold, per ticker |
 | **Trade performance** | Win rate, avg win/loss, expectancy, max drawdown, avg hold duration, open position banner, full trade log table |
@@ -79,6 +79,40 @@ The sheet named `history` must be **publicly shared** ("Anyone with the link can
 | 6 | Price with `$` prefix | `$252.29` |
 
 Rows are comma-separated and quoted. The bot can write the same trading day multiple times — duplicates are deduplicated automatically by `(date, ticker)` key.
+
+---
+
+## AI Analysis — how it works
+
+The AI Analysis section calls `claude-opus-4-8` (with adaptive thinking) to generate a market summary, top picks, and risk watch from the latest signal snapshot.
+
+### Cost guarantee: exactly one Claude call per day
+
+The route uses Next.js `unstable_cache` defined at **module level** with the UTC date passed as an argument:
+
+```
+runClaudeAnalysis("2026-06-17")  →  cache key: ["ai-analysis", "2026-06-17"]
+```
+
+- **Same day, any number of visitors** → all hit the same cache entry → Claude called **once**
+- **Next UTC day** → date argument changes → new cache entry → Claude called **once** again
+- **Cache invalidation is disabled** — the `/api/ai-analysis/invalidate` endpoint returns 405. No client action can trigger a second Claude call on the same day
+- **The Refresh button** re-fetches from the server, which always returns the cached result if it exists — no extra cost
+
+### Client-side behaviour (UX only, not cost control)
+
+| Condition | What the UI shows |
+|---|---|
+| Before 08:30 AM local time | "AI analysis is fetched once after 08:30 AM — check back shortly" |
+| Weekend (server UTC) | "Markets are closed on weekends — AI analysis resumes Monday" |
+| Analysis is from today ≥ 08:30 AM local | "✓ Up to date" (Refresh button disabled) |
+| Analysis is from a previous day | "↻ Refresh" button shown (re-fetches the shared server cache) |
+
+The 08:30 AM cutoff is evaluated in the **user's local timezone** on the client. The server has no per-client time logic — it only enforces the date-keyed cache.
+
+### What Claude receives
+
+The prompt includes, for every ticker: current signal, price, streak length, period return, confidence %, ADX, historical win rate and expectancy. It also includes signal changes since yesterday, and the equal-weight portfolio strategy P&L vs buy-and-hold.
 
 ---
 

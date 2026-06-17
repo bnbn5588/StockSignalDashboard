@@ -1,11 +1,10 @@
-import { revalidateTag } from "next/cache";
-
-export const dynamic = "force-dynamic";
-
-// Called by the Refresh button in AIInsights.tsx.
-// Busts the shared 'ai-analysis' Data Cache so the next GET to
-// /api/ai-analysis re-runs Claude regardless of the daily key.
+// Cache invalidation is intentionally disabled.
+// The AI analysis cache is date-keyed at the server level via unstable_cache.
+// Allowing mid-day invalidation would let any client trigger extra Claude API
+// calls beyond the one guaranteed per day.
 export async function POST() {
-  revalidateTag("ai-analysis");
-  return Response.json({ revalidated: true });
+  return Response.json(
+    { message: "Cache invalidation is not supported. Analysis is generated once per day after 08:30 AM and shared across all clients." },
+    { status: 405 }
+  );
 }
