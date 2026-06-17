@@ -6,6 +6,13 @@ import InfoTooltip from './InfoTooltip';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** True if it's currently at or after 08:30 AM in the user's local timezone. */
+function isAfterCutoff(): boolean {
+  const cutoff = new Date();
+  cutoff.setHours(8, 30, 0, 0);
+  return new Date() >= cutoff;
+}
+
 /** True if the analysis was fetched today at or after 08:30 AM — already up to date. */
 function isAnalysisFresh(fetchedAt?: string): boolean {
   if (!fetchedAt) return false;
@@ -88,7 +95,7 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 
 export default function AIInsights() {
   const [data, setData]                     = useState<AIAnalysis | null>(null);
-  const [status, setStatus]                 = useState<'loading' | 'error' | 'ok'>('loading');
+  const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'early'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
   const [showPrompt, setShowPrompt]         = useState(false);
   const [cacheLabel, setCacheLabel]         = useState('');
@@ -126,7 +133,10 @@ export default function AIInsights() {
     }
   }, []);
 
-  useEffect(() => { fetchAnalysis(); }, [fetchAnalysis]);
+  useEffect(() => {
+    if (!isAfterCutoff()) { setStatus('early'); return; }
+    fetchAnalysis();
+  }, [fetchAnalysis]);
 
   // ── Countdown to next 08:30 AM ──────────────────────────────────────────────
 
@@ -155,6 +165,19 @@ export default function AIInsights() {
   // ── Early states ────────────────────────────────────────────────────────────
 
   if (status === 'loading') return <Skeleton />;
+
+  if (status === 'early') {
+    return (
+      <div style={{ padding: '0.9rem 1rem', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ClaudeIcon size={14} />
+        <span>
+          AI analysis is fetched once after{' '}
+          <strong style={{ color: 'var(--text-primary)' }}>08:30 AM</strong>{' '}
+          (your local time) when the sheet updates — check back shortly.
+        </span>
+      </div>
+    );
+  }
 
   if (status === 'error') {
     return (

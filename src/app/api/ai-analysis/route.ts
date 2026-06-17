@@ -12,12 +12,6 @@ import {
 export const dynamic = "force-dynamic"; // handler always runs; caching done via unstable_cache
 export const maxDuration = 60;
 
-function isAfterCutoff(): boolean {
-  const cutoff = new Date();
-  cutoff.setHours(8, 30, 0, 0);
-  return new Date() >= cutoff;
-}
-
 // Wraps the heavy Claude call in Next.js Data Cache.
 // Key includes today's date → cache auto-resets each new day.
 // Tag 'ai-analysis' → busted by the /invalidate endpoint on manual refresh.
@@ -142,11 +136,6 @@ export async function GET() {
   const day = new Date().getDay();
   if (day === 0 || day === 6) {
     return Response.json({ weekend: true });
-  }
-
-  // Before 08:30 AM: sheet hasn't updated yet — don't call Claude
-  if (!isAfterCutoff()) {
-    return Response.json({ early: true });
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
