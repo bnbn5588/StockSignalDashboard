@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { unstable_cache } from "next/cache";
 import {
   parseCSV,
   latestSnapshot,
@@ -8,79 +9,61 @@ import {
   portfolioSimulation,
 } from "@/lib/analytics";
 
-export const revalidate = 86400; // re-run at most once per day — sheet updates at 08:00 AM
+export const dynamic = "force-dynamic"; // handler always runs; caching done via unstable_cache
 export const maxDuration = 60;
 
-export async function GET() {
-  // Skip Claude on weekends — market is closed and the sheet doesn't update.
-  // Use a short cache (4 h) so the response expires before the next trading day,
-  // instead of inheriting the full 24-hour ISR window.
-  const day = new Date().getDay(); // 0 = Sun, 1 = Mon
-  if (day === 0 || day === 1) {
-    return new Response(
-      JSON.stringify({ weekend: true, generatedAt: new Date().toISOString().slice(0, 10), revalidate: 14400 }),
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 's-maxage=14400', // 4 hours
-        },
-      }
-    );
-  }
+function isAfterCutoff(): boolean {
+  const cutoff = new Date();
+  cutoff.setHours(8, 30, 0, 0);
+  return new Date() >= cutoff;
+}
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json(
-      {
-        error:
-          "ANTHROPIC_API_KEY not configured — add it to .env.local or Vercel Environment Variables.",
-      },
-      { status: 503 },
-    );
-  }
+// Wraps the heavy Claude call in Next.js Data Cache.
+// Key includes today's date → cache auto-resets each new day.
+// Tag 'ai-analysis' → busted by the /invalidate endpoint on manual refresh.
+function buildDailyCache() {
+  const today = new Date().toISOString().slice(0, 10);
 
-  try {
-    // 1. Fetch Google Sheet CSV
-    const sheetId = process.env.SHEET_ID;
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=history`;
-    const csvRes = await fetch(csvUrl, { next: { revalidate: 86400 } });
-    if (!csvRes.ok) throw new Error(`Sheet fetch HTTP ${csvRes.status}`);
-    const csv = await csvRes.text();
+  return unstable_cache(
+    async () => {
+      const sheetId = process.env.SHEET_ID;
+      const csvUrl  = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=history`;
+      const csvRes  = await fetch(csvUrl, { cache: "no-store" });
+      if (!csvRes.ok) throw new Error(`Sheet fetch HTTP ${csvRes.status}`);
+      const csv = await csvRes.text();
 
-    // 2. Parse & compute analytics
-    const allData = parseCSV(csv);
-    const tickers = Object.keys(allData);
-    if (!tickers.length) throw new Error("No data parsed from sheet");
+      const allData = parseCSV(csv);
+      const tickers = Object.keys(allData);
+      if (!tickers.length) throw new Error("No data parsed from sheet");
 
-    const snapshot = latestSnapshot(allData);
-    const consensus = marketConsensus(allData);
-    const fwd       = aggregateForwardReturns(allData);
-    const today     = new Date().toISOString().slice(0, 10);
+      const snapshot  = latestSnapshot(allData);
+      const consensus = marketConsensus(allData);
+      const fwd       = aggregateForwardReturns(allData);
 
-    // Signal changes since the previous trading day
-    const signalChanges: string[] = [];
-    for (const r of snapshot) {
-      const rows = allData[r.ticker];
-      const last = rows.at(-1);
-      const prev = rows.at(-2);
-      if (last && prev && last.signal !== prev.signal) {
-        signalChanges.push(`${r.ticker}: ${prev.signal}→${last.signal}`);
-      }
-    }
-
-    // Portfolio-level P&L (equal-weight, strategy vs buy-and-hold)
-    const portSim  = portfolioSimulation(allData);
-    const portLast = portSim.at(-1);
-    const portLine = portLast
-      ? `Strategy ${portLast.strategy >= 0 ? "+" : ""}${portLast.strategy.toFixed(1)}% vs buy-and-hold ${portLast.bah >= 0 ? "+" : ""}${portLast.bah.toFixed(1)}% (equal-weight across all tickers)`
-      : "Portfolio simulation unavailable";
-
-    // 3. Build compact snapshot table for the prompt
-    const snapshotLines = snapshot
-      .map((r) => {
+      // Signal changes since the previous trading day
+      const signalChanges: string[] = [];
+      for (const r of snapshot) {
         const rows = allData[r.ticker];
-        const last = rows.at(-1)!;
+        const last = rows.at(-1);
+        const prev = rows.at(-2);
+        if (last && prev && last.signal !== prev.signal) {
+          signalChanges.push(`${r.ticker}: ${prev.signal}→${last.signal}`);
+        }
+      }
+
+      // Portfolio-level P&L
+      const portSim  = portfolioSimulation(allData);
+      const portLast = portSim.at(-1);
+      const portLine = portLast
+        ? `Strategy ${portLast.strategy >= 0 ? "+" : ""}${portLast.strategy.toFixed(1)}% vs buy-and-hold ${portLast.bah >= 0 ? "+" : ""}${portLast.bah.toFixed(1)}% (equal-weight across all tickers)`
+        : "Portfolio simulation unavailable";
+
+      // Snapshot table for the prompt
+      const snapshotLines = snapshot.map((r) => {
+        const rows  = allData[r.ticker];
+        const last  = rows.at(-1)!;
         const stats = tradeStats(rows);
-        const perf = stats.totalTrades
+        const perf  = stats.totalTrades
           ? `wr=${Math.round(stats.winRate)}% exp=${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(1)}%`
           : "no_completed_trades";
         return [
@@ -88,22 +71,19 @@ export async function GET() {
           r.signal.padEnd(4),
           `$${r.price.toFixed(2).padStart(8)}`,
           `streak=${r.streak.signal}×${r.streak.days}d`.padEnd(14),
-          `period=${(r.periodChangePct >= 0 ? "+" : "") + r.periodChangePct.toFixed(1) + "%"}`.padEnd(
-            14,
-          ),
+          `period=${(r.periodChangePct >= 0 ? "+" : "") + r.periodChangePct.toFixed(1) + "%"}`.padEnd(14),
           `conf=${last.confidence.toFixed(0).padStart(3)}`,
           `adx=${last.adx.toFixed(0).padStart(3)}`,
           perf,
         ].join(" | ");
-      })
-      .join("\n");
+      }).join("\n");
 
-    const fwdLine =
-      `BUY: ${fwd.BUY.avg >= 0 ? "+" : ""}${fwd.BUY.avg.toFixed(3)}% (n=${fwd.BUY.count}) | ` +
-      `SELL: ${fwd.SELL.avg >= 0 ? "+" : ""}${fwd.SELL.avg.toFixed(3)}% (n=${fwd.SELL.count}) | ` +
-      `HOLD: ${fwd.HOLD.avg >= 0 ? "+" : ""}${fwd.HOLD.avg.toFixed(3)}% (n=${fwd.HOLD.count})`;
+      const fwdLine =
+        `BUY: ${fwd.BUY.avg >= 0 ? "+" : ""}${fwd.BUY.avg.toFixed(3)}% (n=${fwd.BUY.count}) | ` +
+        `SELL: ${fwd.SELL.avg >= 0 ? "+" : ""}${fwd.SELL.avg.toFixed(3)}% (n=${fwd.SELL.count}) | ` +
+        `HOLD: ${fwd.HOLD.avg >= 0 ? "+" : ""}${fwd.HOLD.avg.toFixed(3)}% (n=${fwd.HOLD.count})`;
 
-    const prompt = `You are reviewing algorithmic stock signals generated by a systematic trading bot. Today is ${today}.
+      const prompt = `You are reviewing algorithmic stock signals generated by a systematic trading bot. Today is ${today}.
 
 Portfolio: ${tickers.length} tickers | BUY: ${consensus.BUY} | SELL: ${consensus.SELL} | HOLD: ${consensus.HOLD}
 ${signalChanges.length ? `Signal changes since yesterday: ${signalChanges.join(", ")}` : "No signal changes since yesterday."}
@@ -128,37 +108,61 @@ Respond with ONLY this JSON object (no markdown fences, no text outside the JSON
 
 Rules:
 - topPicks: 1–3 tickers with the strongest BUY conviction (long BUY streak, high confidence, positive expectancy, strong ADX).
-- riskWatch: 1–3 tickers on SELL signals, weak confidence, negative expectancy, or contradictions (BUY signal with negative expectancy, or SELL signal with consistently positive expectancy — flag these explicitly).
+- riskWatch: 1–3 tickers on SELL signals, weak confidence, negative expectancy, or contradictions (BUY signal with negative expectancy, or SELL with positive expectancy — flag explicitly).
 - Highlight tickers that just changed signal today as momentum shifts worth watching.
-- Be specific: cite actual ticker names, streak lengths, confidence scores, or % figures from the data.
+- Be specific: cite actual ticker names, streak lengths, confidence scores, or % figures.
 - Do not invent data not present above.`;
 
-    // 4. Call Claude
-    const client = new Anthropic();
-    const message = await client.messages.create({
-      model: "claude-opus-4-8",
-      max_tokens: 4096,
-      thinking: { type: "adaptive" },
-      messages: [{ role: "user", content: prompt }],
-    });
+      const client  = new Anthropic();
+      const message = await client.messages.create({
+        model: "claude-opus-4-8",
+        max_tokens: 4096,
+        thinking: { type: "adaptive" },
+        messages: [{ role: "user", content: prompt }],
+      });
 
-    // 5. Extract text block (may be preceded by thinking blocks)
-    const textBlock = message.content.find(
-      (b): b is Anthropic.TextBlock => b.type === "text",
+      const textBlock = message.content.find(
+        (b): b is Anthropic.TextBlock => b.type === "text"
+      );
+      if (!textBlock) throw new Error("No text block in Claude response");
+
+      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Could not extract JSON from Claude response");
+      const analysis = JSON.parse(jsonMatch[0]);
+
+      return { ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt };
+    },
+    ["ai-analysis", today],   // date in key → auto-resets every day
+    { tags: ["ai-analysis"] } // tag → bustable via revalidateTag
+  );
+}
+
+export async function GET() {
+  // Weekend: no market activity, no sheet update
+  const day = new Date().getDay();
+  if (day === 0 || day === 6) {
+    return Response.json({ weekend: true });
+  }
+
+  // Before 08:30 AM: sheet hasn't updated yet — don't call Claude
+  if (!isAfterCutoff()) {
+    return Response.json({ early: true });
+  }
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json(
+      { error: "ANTHROPIC_API_KEY not configured — add it to .env.local or Vercel Environment Variables." },
+      { status: 503 }
     );
-    if (!textBlock) throw new Error("No text block in Claude response");
+  }
 
-    // 6. Parse JSON — strip any accidental markdown code fences
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch)
-      throw new Error("Could not extract JSON from Claude response");
-    const analysis = JSON.parse(jsonMatch[0]);
-
-    return Response.json({ ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt, revalidate: 86400 });
+  try {
+    const analysis = await buildDailyCache()();
+    return Response.json(analysis);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
