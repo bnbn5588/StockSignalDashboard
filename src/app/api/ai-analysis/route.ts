@@ -124,10 +124,8 @@ Rules:
 
     return { ...analysis, model: "claude-opus-4-8", fetchedAt: new Date().toISOString(), prompt };
   },
-  ["ai-analysis"]
-  // No tags — this cache is intentionally not bustable mid-day.
-  // Passing `date` as an argument (see GET below) gives one entry per day;
-  // the entry auto-resets when the date changes at UTC midnight.
+  ["ai-analysis"],
+  { revalidate: 86400 } // force 24-hour cache — Claude called at most once per day
 );
 
 export async function GET() {
