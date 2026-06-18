@@ -94,7 +94,7 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 
 export default function AIInsights() {
   const [data, setData]                     = useState<AIAnalysis | null>(null);
-  const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'early'>('loading');
+  const [status, setStatus]                 = useState<'idle' | 'loading' | 'error' | 'ok' | 'early'>('idle');
   const [errMsg, setErrMsg]                 = useState('');
   const [showPrompt, setShowPrompt]         = useState(false);
   const [cacheLabel, setCacheLabel]         = useState('');
@@ -123,10 +123,12 @@ export default function AIInsights() {
     fetchAnalysis();
   }, [fetchAnalysis]);
 
+  // Only check the time on mount — no auto-fetch.
+  // The cron job pre-populates the cache at 08:30 AM; the user loads explicitly.
   useEffect(() => {
-    if (!isAfterCutoff()) { setStatus('early'); return; }
-    fetchAnalysis();
-  }, [fetchAnalysis]);
+    if (!isAfterCutoff()) setStatus('early');
+    // else: stays 'idle' → user sees the Load button
+  }, []);
 
   // ── Countdown to next 08:30 AM ──────────────────────────────────────────────
 
@@ -153,6 +155,23 @@ export default function AIInsights() {
   }, [data]);
 
   // ── Early states ────────────────────────────────────────────────────────────
+
+  if (status === 'idle') {
+    return (
+      <div style={{ padding: '0.9rem 1rem', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <ClaudeIcon size={15} />
+        <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', flex: 1 }}>
+          AI analysis is ready — pre-generated at 08:30 AM and cached for the day.
+        </span>
+        <button
+          onClick={fetchAnalysis}
+          style={{ fontSize: 12, padding: '4px 14px', borderRadius: 6, background: 'var(--bg-primary)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'nowrap' }}
+        >
+          Load analysis
+        </button>
+      </div>
+    );
+  }
 
   if (status === 'loading') return <Skeleton />;
 
