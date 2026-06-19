@@ -94,7 +94,7 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 
 export default function AIInsights() {
   const [data, setData]                     = useState<AIAnalysis | null>(null);
-  const [status, setStatus]                 = useState<'idle' | 'loading' | 'error' | 'ok' | 'early'>('idle');
+  const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'early'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
   const [showPrompt, setShowPrompt]         = useState(false);
   const [cacheLabel, setCacheLabel]         = useState('');
@@ -116,19 +116,15 @@ export default function AIInsights() {
     }
   }, []);
 
-  // Refresh: just re-fetch from the server.
-  // The server's unstable_cache (date-keyed) guarantees at most one Claude call
-  // per day regardless of how many times this is clicked — no cache busting.
   const handleRefresh = useCallback(() => {
     fetchAnalysis();
   }, [fetchAnalysis]);
 
-  // Only check the time on mount — no auto-fetch.
-  // The cron job pre-populates the cache at 08:30 AM; the user loads explicitly.
+  // Auto-fetch on mount. Server checks KV first — Claude only called on cache miss.
   useEffect(() => {
-    if (!isAfterCutoff()) setStatus('early');
-    // else: stays 'idle' → user sees the Load button
-  }, []);
+    if (!isAfterCutoff()) { setStatus('early'); return; }
+    fetchAnalysis();
+  }, [fetchAnalysis]);
 
   // ── Countdown to next 08:30 AM ──────────────────────────────────────────────
 
@@ -155,23 +151,6 @@ export default function AIInsights() {
   }, [data]);
 
   // ── Early states ────────────────────────────────────────────────────────────
-
-  if (status === 'idle') {
-    return (
-      <div style={{ padding: '0.9rem 1rem', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <ClaudeIcon size={15} />
-        <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', flex: 1 }}>
-          AI analysis is ready — pre-generated at 08:30 AM and cached for the day.
-        </span>
-        <button
-          onClick={fetchAnalysis}
-          style={{ fontSize: 12, padding: '4px 14px', borderRadius: 6, background: 'var(--bg-primary)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'nowrap' }}
-        >
-          Load analysis
-        </button>
-      </div>
-    );
-  }
 
   if (status === 'loading') return <Skeleton />;
 
