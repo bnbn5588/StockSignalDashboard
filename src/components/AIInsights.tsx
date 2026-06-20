@@ -182,7 +182,7 @@ export default function AIInsights() {
     return (
       <div style={{ padding: '0.9rem 1rem', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
         <ClaudeIcon size={14} />
-        <span>Markets are closed on weekends — AI analysis resumes Monday after the 08:30 AM sheet update.</span>
+        <span>AI analysis is unavailable on Sunday and Monday — fresh data (Monday close) arrives Tuesday after 08:30 AM.</span>
       </div>
     );
   }

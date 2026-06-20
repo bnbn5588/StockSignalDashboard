@@ -19,9 +19,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET() {
-  // Weekend: no market activity, no sheet update
+  // Skip Sunday and Monday — the sheet still holds Friday's close data on both days
+  // (bot runs T+1, so Monday's 8:30 AM update = Friday close = same as Saturday's analysis).
+  // Fresh data arrives Tuesday after 8:30 AM (Monday close).
   const day = new Date().getDay();
-  if (day === 0 || day === 6) {
+  if (day === 0 || day === 1) {
     return Response.json({ weekend: true });
   }
 
