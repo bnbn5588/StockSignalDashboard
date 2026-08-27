@@ -169,10 +169,34 @@ For every ticker: current signal, price, streak length, period return, confidenc
 |---|---|---|---|
 | `SHEET_ID` | No | value in `.env` | Google Spreadsheet ID from the share URL |
 | `REDIS_URL` | Yes (for AI Analysis) | *(empty)* | Redis instance the [stockBot_AI_Insight](../../stockBot_AI_Insight/README.md) worker writes to |
+| `FINNHUB_API_KEY` | No (for real-time price) | *(empty)* | Finnhub API key for the "Real-time price" KPI card in Ticker deep-dive. Free tier: 60 calls/min. Sign up at [finnhub.io/register](https://finnhub.io/register) |
 
 Create `.env.local` for local overrides — it is gitignored and takes precedence over `.env`. For Vercel, set variables in the dashboard under **Settings → Environment Variables**.
 
 > **Without `REDIS_URL`** the rest of the dashboard works normally — the AI Analysis section displays an "AI analysis unavailable" message instead of insights.
+
+> **Without `FINNHUB_API_KEY`** the rest of the dashboard works normally — the "Real-time price" KPI card just doesn't render; the sheet-derived "Signal price" card is unaffected.
+
+### Real-time price (Ticker deep-dive)
+
+`GET /api/quote?ticker=TICK` proxies [Finnhub](https://finnhub.io)'s quote endpoint
+server-side (keeping the API key out of the client) and caches each ticker's response in
+Redis for 10 seconds — long enough to absorb a burst of requests (multiple visitors, or
+this component's own polling) without multiplying Finnhub calls, short enough that
+"real-time" still means something.
+
+This is purely informational context sitting next to the sheet-derived signal — it never
+feeds into the BUY/SELL/HOLD signals, which remain once-daily from the Google Sheet.
+[TickerSection.tsx](src/components/TickerSection.tsx) fetches a quote when the selected
+ticker changes and re-polls every 20s while mounted, rendering it as a separate
+**"Real-time price"** KPI card (colored green/red by change vs. previous close, with an
+"as of HH:MM" timestamp from Finnhub's own quote time — not just "now," since a quote
+fetched after market close is still the last traded price, not a live one). The existing
+**"Signal price"** card (renamed from "Latest price" for clarity) is unchanged — it's
+still the sheet's last close, the number that actually drives the signal, with its date
+now shown alongside it. When Finnhub has no quote for a symbol (or the key isn't
+configured, or the ticker doesn't trade there), the KPI card simply doesn't render — same
+graceful-omission pattern as the AI Analysis and Recent News cards.
 
 ---
 
@@ -184,14 +208,15 @@ src/
     page.tsx                  # Root page, loads Dashboard dynamically (no SSR)
     layout.tsx                # Viewport meta, global font
     globals.css               # CSS variables (light/dark), canvas touch-action
-    api/sheet-data/route.ts   # Proxy API: fetches & caches the Google Sheet CSV
+    api/sheet-data/route.ts        # Proxy API: fetches & caches the Google Sheet CSV
     api/ai-analysis/route.ts       # Reads today's analysis from Redis — never calls Claude (see stockBot_AI_Insight)
     api/ai-analysis-news/route.ts  # Reads today's news highlights from Redis, if the worker's experimental news step ran
+    api/quote/route.ts             # Proxies Finnhub for a live price, cached 10s in Redis
   components/
     Dashboard.tsx             # Orchestrator: fetch, parse, layout
     SnapshotTable.tsx         # Today's snapshot table + high-confidence alerts
     ConsensusGauge.tsx        # Market pulse: signal split bars + forward returns
-    TickerSection.tsx         # Per-ticker charts with cross-chart tooltip sync
+    TickerSection.tsx         # Per-ticker charts with cross-chart tooltip sync + live Finnhub quote
     PnLChart.tsx              # Simulated P&L chart (strategy vs buy-and-hold)
     TradeLog.tsx              # Trade stats chips + open position + trade table
     HeatmapGrid.tsx           # Monthly signal heatmap (CSS grid, no Chart.js)

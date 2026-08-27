@@ -59,14 +59,38 @@ interface NewsAnalysis {
 
 // ── Subcomponents ─────────────────────────────────────────────────────────────
 
-function TickerCard({ item, signal }: { item: TickerPoint; signal: 'BUY' | 'SELL' }) {
+/** Colored ticker badge — a button when onSelect is given, so clicking it can jump the
+ * Ticker deep-dive section to that ticker; otherwise a plain span. */
+function TickerBadge({ ticker, color, background, onSelect }: { ticker: string; color: string; background: string; onSelect?: (ticker: string) => void }) {
+  if (!onSelect) {
+    return (
+      <span style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background, letterSpacing: '0.03em' }}>
+        {ticker}
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={() => onSelect(ticker)}
+      title={`Jump to ${ticker} in Ticker deep-dive`}
+      style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background, letterSpacing: '0.03em', border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
+    >
+      {ticker}
+    </button>
+  );
+}
+
+function TickerCard({ item, signal, onSelect }: { item: TickerPoint; signal: 'BUY' | 'SELL'; onSelect?: (ticker: string) => void }) {
   const color = SIG_COLORS[signal];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0.55rem 0.75rem', borderRadius: 8, background: signal === 'BUY' ? 'rgba(29,158,117,0.07)' : 'rgba(216,90,48,0.07)', border: `1px solid ${color}33` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background: signal === 'BUY' ? 'rgba(29,158,117,0.14)' : 'rgba(216,90,48,0.14)', letterSpacing: '0.03em' }}>
-          {item.ticker}
-        </span>
+        <TickerBadge
+          ticker={item.ticker}
+          color={color}
+          background={signal === 'BUY' ? 'rgba(29,158,117,0.14)' : 'rgba(216,90,48,0.14)'}
+          onSelect={onSelect}
+        />
         <span style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.75 }}>{signal}</span>
       </div>
       <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
@@ -76,15 +100,13 @@ function TickerCard({ item, signal }: { item: TickerPoint; signal: 'BUY' | 'SELL
   );
 }
 
-function NewsCard({ item, signal }: { item: NewsHighlight; signal?: 'BUY' | 'SELL' }) {
+function NewsCard({ item, signal, onSelect }: { item: NewsHighlight; signal?: 'BUY' | 'SELL'; onSelect?: (ticker: string) => void }) {
   const color = signal ? SIG_COLORS[signal] : SIG_COLORS.HOLD;
   const badgeBg = signal === 'BUY' ? 'rgba(29,158,117,0.14)' : signal === 'SELL' ? 'rgba(216,90,48,0.14)' : 'rgba(136,135,128,0.14)';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0.65rem 0.8rem', borderRadius: 8, background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background: badgeBg, letterSpacing: '0.03em' }}>
-          {item.ticker}
-        </span>
+        <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
         <span style={{ fontSize: 10, color: 'var(--text-secondary)', opacity: 0.65, wordBreak: 'break-word' }}>
           {item.source}{item.publishedDate ? ` · ${item.publishedDate}` : ''}
         </span>
@@ -196,7 +218,7 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function AIInsights() {
+export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticker: string) => void }) {
   const [data, setData]                     = useState<AIAnalysis | null>(null);
   const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'no-data'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
@@ -381,7 +403,7 @@ export default function AIInsights() {
             <div>
               <SectionLabel info="Tickers with the strongest BUY conviction — long streak, high confidence, positive expectancy, strong ADX.">Top picks</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.topPicks.map(p => <TickerCard key={p.ticker} item={p} signal="BUY" />)}
+                {data.topPicks.map(p => <TickerCard key={p.ticker} item={p} signal="BUY" onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
@@ -389,7 +411,7 @@ export default function AIInsights() {
             <div>
               <SectionLabel info="Tickers on SELL signals, weak confidence, negative expectancy, or signal/performance contradictions.">Risk watch</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={p} signal="SELL" />)}
+                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={p} signal="SELL" onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
@@ -470,7 +492,7 @@ export default function AIInsights() {
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {newsData.newsHighlights.map(n => (
-              <NewsCard key={n.ticker} item={n} signal={tickerSignal(n.ticker)} />
+              <NewsCard key={n.ticker} item={n} signal={tickerSignal(n.ticker)} onSelect={onTickerSelect} />
             ))}
           </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseCSV, latestDataDate, type AllData } from '@/lib/analytics';
 import SnapshotTable from './SnapshotTable';
 import ConsensusGauge from './ConsensusGauge';
@@ -39,6 +39,16 @@ export default function Dashboard() {
   const [allData, setAllData] = useState<AllData>({});
   const [status, setStatus] = useState<'loading' | 'error' | 'ok'>('loading');
   const [errMsg, setErrMsg] = useState('');
+
+  // Ticker deep-dive selection is lifted up here so clicking a ticker anywhere else on
+  // the page (snapshot table, AI analysis picks/news) can drive it.
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const tickerSectionRef = useRef<HTMLDivElement>(null);
+
+  const jumpToTicker = useCallback((t: string) => {
+    setSelectedTicker(t);
+    tickerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   useEffect(() => {
     fetch('/api/sheet-data')
@@ -92,7 +102,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Snapshot + market pulse ──────────────────────────────────────────── */}
-      <SnapshotTable allData={allData} />
+      <SnapshotTable allData={allData} onTickerSelect={jumpToTicker} />
       <ConsensusGauge allData={allData} />
 
       {/* ── Claude AI analysis ───────────────────────────────────────────────── */}
@@ -100,14 +110,16 @@ export default function Dashboard() {
         title="AI Analysis — Claude"
         info="A Claude-powered summary generated from the daily signal snapshot. Cached for 24 hours — Claude is called once per day, after the sheet updates at 08:00 AM. Not financial advice."
       />
-      <AIInsights />
+      <AIInsights onTickerSelect={jumpToTicker} />
 
       {/* ── Ticker deep-dive ─────────────────────────────────────────────────── */}
-      <Divider
-        title="Ticker deep-dive"
-        info="Select a ticker to see its full price history with signal overlays, monthly distribution, confidence trend, simulated P&L, and a trade-by-trade performance log."
-      />
-      <TickerSection allData={allData} />
+      <div ref={tickerSectionRef}>
+        <Divider
+          title="Ticker deep-dive"
+          info="Select a ticker to see its full price history with signal overlays, monthly distribution, confidence trend, simulated P&L, and a trade-by-trade performance log. Click any ticker in the snapshot table or AI analysis above to jump here."
+        />
+        <TickerSection allData={allData} selectedTicker={selectedTicker} onTickerChange={setSelectedTicker} />
+      </div>
 
       {/* ── Cross-ticker heatmap ─────────────────────────────────────────────── */}
       <Divider

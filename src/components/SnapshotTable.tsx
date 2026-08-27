@@ -97,7 +97,13 @@ function SortTh({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function SnapshotTable({ allData }: { allData: AllData }) {
+export default function SnapshotTable({
+  allData,
+  onTickerSelect,
+}: {
+  allData: AllData;
+  onTickerSelect?: (ticker: string) => void;
+}) {
   const snapshot = latestSnapshot(allData);
   const alerts   = highConfidenceAlerts(allData, 5);
 
@@ -136,8 +142,10 @@ export default function SnapshotTable({ allData }: { allData: AllData }) {
             <InfoTooltip text="Tickers currently on 5 or more consecutive trading days with the same signal. A longer streak means the algorithm hasn't changed its mind in a while — treat it as a conviction indicator, not a guarantee." />
           </span>
           {alerts.map(a => (
-            <span
+            <button
               key={a.ticker}
+              onClick={() => onTickerSelect?.(a.ticker)}
+              title={onTickerSelect ? `Jump to ${a.ticker} in Ticker deep-dive` : undefined}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -149,10 +157,11 @@ export default function SnapshotTable({ allData }: { allData: AllData }) {
                 background: SIG_BG[a.signal],
                 color: SIG_COLORS[a.signal],
                 border: `1px solid ${SIG_COLORS[a.signal]}44`,
+                cursor: onTickerSelect ? 'pointer' : 'default',
               }}
             >
               {a.ticker} {a.signal} ×{a.days}d
-            </span>
+            </button>
           ))}
         </div>
       )}
@@ -183,9 +192,12 @@ export default function SnapshotTable({ allData }: { allData: AllData }) {
             {sorted.map((row, i) => (
               <tr
                 key={row.ticker}
+                onClick={() => onTickerSelect?.(row.ticker)}
+                title={onTickerSelect ? `Jump to ${row.ticker} in Ticker deep-dive` : undefined}
                 style={{
                   background: i % 2 === 0 ? SIG_BG[row.signal] : 'transparent',
                   borderBottom: '1px solid var(--border-color)',
+                  cursor: onTickerSelect ? 'pointer' : 'default',
                 }}
               >
                 <td style={{ padding: '7px 10px', fontWeight: 600 }}>{row.ticker}</td>
