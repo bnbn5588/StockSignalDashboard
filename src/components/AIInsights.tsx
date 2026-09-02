@@ -57,6 +57,22 @@ interface NewsAnalysis {
   tokenUsage?: TokenUsage;
 }
 
+interface FinalRecommendation {
+  ticker: string;
+  stance: 'favor' | 'caution';
+  reason: string;
+}
+
+interface FinalAnalysis {
+  generatedAt: string;
+  summary: string;
+  recommendations: FinalRecommendation[];
+  model: string;
+  fetchedAt?: string;
+  prompt?: string;
+  tokenUsage?: TokenUsage;
+}
+
 // ── Subcomponents ─────────────────────────────────────────────────────────────
 
 /** Colored ticker badge — a button when onSelect is given, so clicking it can jump the
@@ -116,6 +132,25 @@ function NewsCard({ item, signal, onSelect }: { item: NewsHighlight; signal?: 'B
       </p>
       <p style={{ margin: 0, fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)', fontStyle: 'italic', borderLeft: '2px solid var(--border-color)', paddingLeft: 8, wordBreak: 'break-word' }}>
         {item.recommendation}
+      </p>
+    </div>
+  );
+}
+
+function FinalCard({ item, onSelect }: { item: FinalRecommendation; onSelect?: (ticker: string) => void }) {
+  const favor = item.stance === 'favor';
+  const color = favor ? SIG_COLORS.BUY : SIG_COLORS.SELL;
+  const badgeBg = favor ? 'rgba(29,158,117,0.14)' : 'rgba(216,90,48,0.14)';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0.55rem 0.75rem', borderRadius: 8, background: favor ? 'rgba(29,158,117,0.07)' : 'rgba(216,90,48,0.07)', border: `1px solid ${color}33` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
+        <span style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+          {item.stance}
+        </span>
+      </div>
+      <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+        {item.reason}
       </p>
     </div>
   );
@@ -223,11 +258,15 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
   const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'no-data'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
   const [newsData, setNewsData]             = useState<NewsAnalysis | null>(null);
+  const [finalData, setFinalData]           = useState<FinalAnalysis | null>(null);
   const [showPrompt, setShowPrompt]         = useState(false);
   const [showUsage, setShowUsage]           = useState(false);
   const [showNewsPrompt, setShowNewsPrompt] = useState(false);
   const [showNewsUsage, setShowNewsUsage]   = useState(false);
+  const [showFinalPrompt, setShowFinalPrompt] = useState(false);
+  const [showFinalUsage, setShowFinalUsage] = useState(false);
   const [newsExpanded, setNewsExpanded]     = useState(true);
+  const [finalExpanded, setFinalExpanded]   = useState(true);
   const [cacheLabel, setCacheLabel]         = useState('');
   const [confirmRefresh, setConfirmRefresh] = useState(false);
 
@@ -260,16 +299,31 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
     }
   }, []);
 
+  // Final synthesis is chained after every news run — same graceful-absence handling.
+  const fetchFinal = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ai-analysis-final');
+      if (!res.ok) { setFinalData(null); return; }
+      const json: FinalAnalysis & { error?: string } = await res.json();
+      setFinalData(json.error ? null : json);
+    } catch {
+      setFinalData(null);
+    }
+  }, []);
+
   const handleRefresh = useCallback(() => {
     fetchAnalysis();
     fetchNews();
-  }, [fetchAnalysis, fetchNews]);
+    fetchFinal();
+  }, [fetchAnalysis, fetchNews, fetchFinal]);
 
-  // Auto-fetch on mount — the key either exists in Redis or it doesn't.
+  // Auto-fetch on mount — the worker regenerates news/final on the order of hours (not
+  // seconds), so a page load or the Refresh button is enough; no need to poll.
   useEffect(() => {
     fetchAnalysis();
     fetchNews();
-  }, [fetchAnalysis, fetchNews]);
+    fetchFinal();
+  }, [fetchAnalysis, fetchNews, fetchFinal]);
 
   // ── Countdown to next 08:30 AM ──────────────────────────────────────────────
 
@@ -526,10 +580,83 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
     </div>
   );
 
+  // ── Final recommendation card ───────────────────────────────────────────────
+  // Its own card, entirely independent of mainCard/newsCard's status — reconciles
+  // both into one favor/caution stance per ticker. Chained automatically at the end
+  // of every news run and has no cache-skip, so unlike the once-daily AI Analysis
+  // above, this can be rewritten a few times over the trading day (the worker's news
+  // step runs on the order of hours, not minutes) — reload the page or hit Refresh
+  // above to pick up a newer version; this component doesn't poll for one.
+
+  const finalCard = finalData && finalData.recommendations?.length > 0 && (
+    <div style={{ padding: '1.25rem', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
+        <ClaudeIcon size={16} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Final Recommendation</span>
+        <InfoTooltip text="Reconciles the AI Analysis's quant signals with Recent News into one favor/caution stance per ticker — no new data or search, pure synthesis. Regenerated every time the news step runs (a few times a day, not continuously), so it can change intraday unlike the once-daily AI Analysis above — reload the page or use the Refresh button up top to check for a newer version." />
+        {finalData.fetchedAt && (
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+            Updated {new Date(finalData.fetchedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+          </span>
+        )}
+      </div>
+
+      {/* Summary — always visible, it's the headline takeaway */}
+      <p style={{ margin: '0 0 1rem', fontSize: 13, lineHeight: 1.65, color: 'var(--text-primary)' }}>
+        {finalData.summary}
+      </p>
+
+      <CollapsibleHeader
+        title={`${finalData.recommendations.length} ticker${finalData.recommendations.length === 1 ? '' : 's'} reconciled`}
+        expanded={finalExpanded}
+        onToggle={() => setFinalExpanded(v => !v)}
+      />
+
+      {finalExpanded && (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+            {finalData.recommendations.map(r => (
+              <FinalCard key={r.ticker} item={r} onSelect={onTickerSelect} />
+            ))}
+          </div>
+
+          {finalData.prompt && (
+            <PromptViewer
+              label="prompt sent for final synthesis"
+              prompt={finalData.prompt}
+              show={showFinalPrompt}
+              onToggle={() => setShowFinalPrompt(v => !v)}
+            />
+          )}
+
+          {finalData.tokenUsage && (
+            <UsageViewer
+              label="final synthesis token usage"
+              usage={finalData.tokenUsage}
+              show={showFinalUsage}
+              onToggle={() => setShowFinalUsage(v => !v)}
+              note="Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. No search or tool access, so usage is typically closer to the signal-only analysis than to the news step."
+            />
+          )}
+        </>
+      )}
+
+      {/* Footer */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-secondary)', opacity: 0.55, marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
+        <ClaudeIcon size={11} />
+        <span>Powered by {finalData.model} · Not financial advice</span>
+      </div>
+
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {mainCard}
       {newsCard}
+      {finalCard}
     </div>
   );
 }

@@ -99,42 +99,52 @@ today — a plain `redis.get`, no Anthropic SDK, no API key.
 | `ai-analysis-prompt:{date}` | The prompt string the worker sent to Claude — merged into the API response as `prompt` for the "view prompt" UI |
 | `ai-analysis-news:{date}` | `generatedAt`, `newsHighlights` (`ticker`, `summary`, `source`, `publishedDate`, `recommendation`), `model`, `fetchedAt`, `tokenUsage` — read via a separate route, `GET /api/ai-analysis-news` |
 | `ai-analysis-news-prompt:{date}` | The news-only prompt string — merged into that route's response as `prompt` |
+| `ai-analysis-final:{date}` | `generatedAt`, `summary`, `recommendations` (`ticker`, `stance`: `"favor"` \| `"caution"`, `reason`), `model`, `fetchedAt`, `tokenUsage` — read via `GET /api/ai-analysis-final` |
+| `ai-analysis-final-prompt:{date}` | The final-synthesis prompt string — merged into that route's response as `prompt` |
 
 `tokenUsage` (input/output/thinking/cache tokens + `totalCostUsd`) is surfaced in the UI behind a "View token usage" toggle. `totalCostUsd` is shown as an equivalent pay-per-token reference figure only — the worker bills against a Claude subscription, not per call.
 
-Both keys use a UTC date (`YYYY-MM-DD`) and a 25h TTL, written by the worker's `main.py`.
-The route does no day-of-week or time-of-day gating of its own — it purely reflects
-whether today's key exists: if today's key doesn't exist yet (worker hasn't run, or
+`ai-analysis:{date}` uses a UTC date (`YYYY-MM-DD`) and a 25h TTL, written once daily by
+the worker's `main.py`. The route does no day-of-week or time-of-day gating of its own —
+it purely reflects whether today's key exists: if it doesn't (worker hasn't run, or
 failed, or it's a non-trading day the worker skipped), the route returns a 404 with an
 explanatory message rather than generating anything itself.
 
 - **Cache invalidation is disabled** — the `/api/ai-analysis/invalidate` endpoint returns 405. Deleting the Redis key wouldn't trigger a new analysis anyway, since this app has no way to generate one — it would just make the dashboard show "no data" until the worker's next scheduled run.
-- **The Refresh button** re-fetches both `/api/ai-analysis` and `/api/ai-analysis-news`, i.e. re-reads Redis — there is no scenario in which using this dashboard causes a Claude call.
+- **The Refresh button** re-fetches `/api/ai-analysis`, `/api/ai-analysis-news`, and `/api/ai-analysis-final`, i.e. re-reads Redis — there is no scenario in which using this dashboard causes a Claude call.
+- **No client-side polling.** All three keys are fetched once on mount. Recent News and Final Recommendation have no cache-skip on the worker side and do get overwritten as the news step re-runs, but on the order of hours (not seconds or minutes) — so a page reload or the Refresh button is the intended way to pick up a newer version, not a live-updating widget.
 
-### Recent News card
+### Recent News and Final Recommendation cards
 
-`worker/main_news.py` is an experimental, manually-run step in the worker (not on the
-daily cron by default — see the worker's README) that searches news for whichever
-tickers `ai-analysis:{date}` already flagged in `topPicks`/`riskWatch`. Because it's not
-guaranteed to run, `GET /api/ai-analysis-news` is fetched independently of
-`/api/ai-analysis`, and in [AIInsights.tsx](src/components/AIInsights.tsx) it renders as
-its own separate card ("Recent News") rather than being nested inside the AI Analysis
-card:
+`worker/main_news.py` searches news for whichever tickers `ai-analysis:{date}` already
+flagged in `topPicks`/`riskWatch`, on its own independent schedule (see the worker's
+README) — and a successful run automatically chains into `worker/main_final.py`, which
+reconciles the quant signal and the news finding into one `favor`/`caution` stance per
+ticker. In [AIInsights.tsx](src/components/AIInsights.tsx) both render as their own
+separate cards ("Recent News", "Final Recommendation") below the AI Analysis card,
+rather than being nested inside it:
 
-- **The two cards are fully decoupled.** Each has its own loading/fetch lifecycle. The
-  Recent News card renders as soon as it has data — even if the AI Analysis card above
-  it is still loading, showing "no analysis found yet," or errored. Conversely the AI
-  Analysis card renders fine with no news card present at all (the common case, since
-  the news step doesn't run every day).
-- **Badge colors need the AI Analysis data to mean anything.** Each news card's ticker
-  badge is colored by matching it against that day's `topPicks` (green) / `riskWatch`
-  (orange) from the *AI Analysis* response — the news step itself never says buy or
-  sell, it only comments on whether the news reinforces, tempers, or contradicts
-  whatever was already flagged. If the AI Analysis card hasn't loaded (or errored) when
-  the news card renders, there's nothing to match against, so badges fall back to a
-  neutral gray rather than blocking the news card from showing at all.
-- When there's no news data at all (the far more common state), the news card renders
-  nothing — no placeholder, no error — same as before.
+- **All three cards are fully decoupled.** Each has its own fetch lifecycle. Recent News
+  and Final Recommendation render as soon as they have data — even if the AI Analysis
+  card above is still loading, showing "no analysis found yet," or errored. Conversely
+  AI Analysis renders fine with neither of the other two cards present (e.g. before the
+  news step has run yet today).
+- **Badge colors need the AI Analysis data to mean anything.** Both Recent News and
+  Final Recommendation color their ticker badges by matching against that day's
+  `topPicks` (green) / `riskWatch` (orange) from the *AI Analysis* response — neither
+  step ever independently says buy or sell. Recent News just comments on whether the
+  news reinforces, tempers, or contradicts what was already flagged; Final
+  Recommendation's `favor`/`caution` stance drives its own badge color directly (favor =
+  green, caution = orange), but if the AI Analysis card hasn't loaded, ticker badges
+  that don't come from a `stance` (i.e. none, here — Final Recommendation always has its
+  own color) fall back to neutral gray rather than blocking the card from showing.
+- **Final Recommendation changes the most often of the three.** It has no cache-skip and
+  is rewritten every time the news step runs (a few times a day, not continuously) — its
+  header shows "Updated \<date, time\>" rather than the "Fetched \<date\>" / "✓ Up to
+  date" language used on the once-daily AI Analysis card, since the date alone wouldn't
+  distinguish this morning's version from an hour ago. Reload or hit Refresh to check
+  for a newer one — there's no auto-refresh.
+- When a card has no data at all, it renders nothing — no placeholder, no error.
 
 Like the main analysis, its prompt and token usage are viewable behind their own
 "View prompt sent for news search" / "View news token usage" toggles inside the Recent
@@ -211,6 +221,7 @@ src/
     api/sheet-data/route.ts        # Proxy API: fetches & caches the Google Sheet CSV
     api/ai-analysis/route.ts       # Reads today's analysis from Redis — never calls Claude (see stockBot_AI_Insight)
     api/ai-analysis-news/route.ts  # Reads today's news highlights from Redis, if the worker's experimental news step ran
+    api/ai-analysis-final/route.ts # Reads today's final favor/caution recommendations from Redis, if the worker's final-synthesis step ran
     api/quote/route.ts             # Proxies Finnhub for a live price, cached 10s in Redis
   components/
     Dashboard.tsx             # Orchestrator: fetch, parse, layout
