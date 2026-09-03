@@ -50,21 +50,45 @@ export default function Dashboard() {
     tickerSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  useEffect(() => {
-    fetch('/api/sheet-data')
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then(csv => {
-        setAllData(parseCSV(csv));
-        setStatus('ok');
-      })
-      .catch(e => {
-        setErrMsg(String(e.message));
-        setStatus('error');
-      });
+  // silent=true is for background refreshes: skip the loading screen, and on failure
+  // keep showing the last good data rather than wiping the whole dashboard over a
+  // transient network/sheet hiccup.
+  const fetchSheetData = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setStatus('loading');
+    try {
+      // no-store: this app's own copy of "freshness" is the server's s-maxage=300
+      // Cache-Control on /api/sheet-data — the browser shouldn't also cache this
+      // response on top of that, or a manual reload could still show stale data.
+      const r = await fetch('/api/sheet-data', { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const csv = await r.text();
+      setAllData(parseCSV(csv));
+      setStatus('ok');
+    } catch (e) {
+      if (opts?.silent) return;
+      setErrMsg(String((e as Error).message ?? e));
+      setStatus('error');
+    }
   }, []);
+
+  // Poll to match the server's 5-minute cache window (the "refreshes every 5 min" text
+  // below), and refetch on tab focus in case the tab was backgrounded/asleep longer
+  // than that — otherwise this only ever fetches once on mount and goes stale until a
+  // manual page reload, which is what "the data never updates" reports usually are.
+  useEffect(() => {
+    fetchSheetData();
+
+    const id = setInterval(() => fetchSheetData({ silent: true }), 5 * 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchSheetData({ silent: true });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [fetchSheetData]);
 
   if (status === 'loading') {
     return (

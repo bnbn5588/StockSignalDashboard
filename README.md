@@ -56,11 +56,20 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Deploy to Vercel
 
 1. Push the `stock-dashboard` folder to a GitHub repository.
-2. Go to [vercel.com](https://vercel.com) 뿯↽ **Add New Project** 뿯↽ import the repo.
+2. Go to [vercel.com](https://vercel.com) → **Add New Project** → import the repo.
 3. Vercel auto-detects Next.js. Click **Deploy** — no additional settings needed.
-4. *(Optional)* To use a different Google Sheet, go to **Settings 뿯↽ Environment Variables** and add `SHEET_ID` with your sheet's ID.
+4. *(Optional)* To use a different Google Sheet, go to **Settings → Environment Variables** and add `SHEET_ID` with your sheet's ID.
 
-The API route caches the Google Sheets response for **5 minutes** (ISR). No cold-start latency for visitors after the first request.
+`/api/sheet-data` caches the Google Sheets response for **5 minutes** at Vercel's edge
+(`Cache-Control: public, s-maxage=300, stale-while-revalidate=60` — no cold-start latency
+for visitors after the first request). The **client also polls** this endpoint every 5
+minutes and again whenever the tab regains focus (`Dashboard.tsx`), with `cache:
+'no-store'` on that fetch so the browser itself never serves a locally-cached copy on
+top of the edge cache. Without this, the dashboard only ever fetched once on page load —
+correct on first visit, but it would silently go stale for anyone leaving the tab open,
+despite the page's own "refreshes every 5 min" label. A background poll failure (a
+transient network or Google Sheets hiccup) is swallowed rather than shown, so it doesn't
+wipe out an already-working dashboard over one bad request.
 
 ---
 

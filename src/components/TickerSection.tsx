@@ -93,6 +93,7 @@ function useQuote(ticker: string): Quote | null {
       try {
         const res = await fetch(
           `/api/quote?ticker=${encodeURIComponent(ticker)}`,
+          { cache: "no-store" },
         );
         if (!active) return;
         if (!res.ok) {

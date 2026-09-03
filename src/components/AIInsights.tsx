@@ -276,7 +276,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
     setStatus('loading');
     setConfirmRefresh(false);
     try {
-      const res  = await fetch('/api/ai-analysis');
+      const res  = await fetch('/api/ai-analysis', { cache: 'no-store' });
       const json: AIAnalysis & { error?: string } = await res.json();
       if (json.error) { setErrMsg(json.error); setStatus(res.status === 404 ? 'no-data' : 'error'); }
       else { setData(json); setStatus('ok'); }
@@ -290,7 +290,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
   // an error, so failures here are swallowed rather than surfaced as UI error state.
   const fetchNews = useCallback(async () => {
     try {
-      const res = await fetch('/api/ai-analysis-news');
+      const res = await fetch('/api/ai-analysis-news', { cache: 'no-store' });
       if (!res.ok) { setNewsData(null); return; }
       const json: NewsAnalysis & { error?: string } = await res.json();
       setNewsData(json.error ? null : json);
@@ -302,7 +302,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
   // Final synthesis is chained after every news run — same graceful-absence handling.
   const fetchFinal = useCallback(async () => {
     try {
-      const res = await fetch('/api/ai-analysis-final');
+      const res = await fetch('/api/ai-analysis-final', { cache: 'no-store' });
       if (!res.ok) { setFinalData(null); return; }
       const json: FinalAnalysis & { error?: string } = await res.json();
       setFinalData(json.error ? null : json);
