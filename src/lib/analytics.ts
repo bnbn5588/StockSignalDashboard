@@ -29,8 +29,12 @@ export const SIG_COLORS: Record<string, string> = {
 // Col 5 = trend strength string (e.g. "Strong (ADX: 60.63)")
 // Col 6 = price with $-prefix
 //
-// The bot runs daily so the same trading-day row appears multiple times;
-// we keep only the first occurrence per (date, ticker).
+// The bot can write the same trading day more than once — a scheduled run followed by
+// a manual rerun (e.g. after the scheduled run hit a stale/failed data fetch) — and the
+// later write is the authoritative one for that day, not the earlier one. So we keep
+// the LAST occurrence per (date, ticker), not the first: iterating the sheet top to
+// bottom in file order and overwriting on every repeat of the same key naturally
+// prefers whichever write happened most recently that day.
 
 function splitCSVLine(line: string): string[] {
   const out: string[] = [];
@@ -46,8 +50,7 @@ function splitCSVLine(line: string): string[] {
 }
 
 export function parseCSV(csv: string): AllData {
-  const data: AllData = {};
-  const seen = new Set<string>();
+  const byKey = new Map<string, Row & { ticker: string }>();
 
   for (const line of csv.trim().split('\n')) {
     if (!line.trim()) continue;
@@ -66,11 +69,13 @@ export function parseCSV(csv: string): AllData {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     if (!ticker || !signal || isNaN(price) || price <= 0) continue;
 
-    const key = `${date}|${ticker}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    // Map.set on an existing key overwrites in place — later rows in file order win.
+    byKey.set(`${date}|${ticker}`, { ticker, date, signal, price, strength, confidence, adx });
+  }
 
-    (data[ticker] ??= []).push({ date, signal, price, strength, confidence, adx });
+  const data: AllData = {};
+  for (const { ticker, ...row } of Array.from(byKey.values())) {
+    (data[ticker] ??= []).push(row);
   }
 
   for (const rows of Object.values(data)) {

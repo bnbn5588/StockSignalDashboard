@@ -87,7 +87,7 @@ The sheet named `history` must be **publicly shared** ("Anyone with the link can
 | 5 | Trend strength string | `Strong (ADX: 60.63)` |
 | 6 | Price with `$` prefix | `$252.29` |
 
-Rows are comma-separated and quoted. The bot can write the same trading day multiple times — duplicates are deduplicated automatically by `(date, ticker)` key.
+Rows are comma-separated and quoted. The bot can write the same trading day multiple times — e.g. a scheduled run followed by a manual rerun after the scheduled one hit stale/failed data — and duplicates are deduplicated by `(date, ticker)` key, keeping the **last** row for that key rather than the first, since a later same-day write is a correction, not a retry of identical data.
 
 ---
 
