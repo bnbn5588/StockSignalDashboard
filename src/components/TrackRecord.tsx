@@ -16,6 +16,7 @@ interface Summary {
   horizons: number[];
   engine: { daily: Groups; events: Groups; pending: number };
   ai: { stances: Groups; pending: number; days: number };
+  history?: { from: string | null; to: string | null; daily: Groups; events: Groups };
   recentAi: RecentCall[];
 }
 
@@ -154,6 +155,20 @@ export default function TrackRecord() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {data.history?.from && (
+        <>
+          <StatsTable
+            title={`Engine signal changes — rebuilt history ${data.history.from} → ${data.history.to} (backtest, not live)`}
+            groups={data.history.events} labels={['BUY', 'SELL', 'HOLD']} horizons={horizons} />
+          <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: -8, marginBottom: '1rem' }}>
+            The sheet&apos;s pre-go-live rows were recomputed with the v2 engine using only data
+            available on each day, but v2 was chosen after this period was known — treat these as
+            a backtest. AI stances have no history: they can&apos;t be regenerated without the
+            model and its news search seeing what happened next.
+          </p>
+        </>
       )}
 
       <p style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
