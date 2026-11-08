@@ -56,7 +56,7 @@ export default function Dashboard() {
   const fetchSheetData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setStatus('loading');
     try {
-      // no-store: this app's own copy of "freshness" is the server's s-maxage=300
+      // no-store: this app's own copy of "freshness" is the server's s-maxage=60
       // Cache-Control on /api/sheet-data — the browser shouldn't also cache this
       // response on top of that, or a manual reload could still show stale data.
       const r = await fetch('/api/sheet-data', { cache: 'no-store' });
@@ -71,8 +71,8 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Poll to match the server's 5-minute cache window (the "refreshes every 5 min" text
-  // below), and refetch on tab focus in case the tab was backgrounded/asleep longer
+  // Poll every 5 min (the "refreshes every 5 min" text below — the sheet only
+  // changes once a day, the server cache is 60s), and refetch on tab focus in case the tab was backgrounded/asleep longer
   // than that — otherwise this only ever fetches once on mount and goes stale until a
   // manual page reload, which is what "the data never updates" reports usually are.
   useEffect(() => {

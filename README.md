@@ -60,9 +60,12 @@ Open [http://localhost:3000](http://localhost:3000).
 3. Vercel auto-detects Next.js. Click **Deploy** — no additional settings needed.
 4. *(Optional)* To use a different Google Sheet, go to **Settings → Environment Variables** and add `SHEET_ID` with your sheet's ID.
 
-`/api/sheet-data` caches the Google Sheets response for **5 minutes** at Vercel's edge
-(`Cache-Control: public, s-maxage=300, stale-while-revalidate=60` — no cold-start latency
-for visitors after the first request). The **client also polls** this endpoint every 5
+`/api/sheet-data` is a dynamic route with a single cache layer: Vercel's edge keeps the
+response for **60 seconds** (`Cache-Control: public, s-maxage=60`, no
+`stale-while-revalidate`), and neither the route nor the Google fetch is cached by Next.js.
+So a visitor gets data at most ~1-2 minutes old (60s here plus Google's own short gviz
+cache) on the first load — earlier versions stacked three 5-minute stale-while-revalidate
+caches and could need 2-3 reloads to show a new day's rows. The **client also polls** this endpoint every 5
 minutes and again whenever the tab regains focus (`Dashboard.tsx`), with `cache:
 'no-store'` on that fetch so the browser itself never serves a locally-cached copy on
 top of the edge cache. Without this, the dashboard only ever fetched once on page load —
