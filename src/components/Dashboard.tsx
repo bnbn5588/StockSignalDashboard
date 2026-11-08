@@ -10,6 +10,7 @@ import PortfolioChart from './PortfolioChart';
 import NormalizedChart from './NormalizedChart';
 import InfoTooltip from './InfoTooltip';
 import AIInsights from './AIInsights';
+import TrackRecord from './TrackRecord';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,13 @@ export default function Dashboard() {
         info="A Claude-powered summary generated from the daily signal snapshot. Cached for 24 hours — Claude is called once per day, after the sheet updates at 08:00 AM. Not financial advice."
       />
       <AIInsights onTickerSelect={jumpToTicker} />
+
+      {/* ── Forward-test track record ────────────────────────────────────────── */}
+      <Divider
+        title="Track record — live calls vs SPY"
+        info="How the live calls actually did after go-live: each AI final stance and each engine signal change is scored against SPY over the next 5, 10 and 20 trading days. Updated once a day. Small samples are noise — this becomes meaningful after a couple of months."
+      />
+      <TrackRecord />
 
       {/* ── Ticker deep-dive ─────────────────────────────────────────────────── */}
       <div ref={tickerSectionRef}>
