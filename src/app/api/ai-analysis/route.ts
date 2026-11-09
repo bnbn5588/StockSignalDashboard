@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { latestCached } from "@/lib/latestCached";
 
 // Single Redis client reused across warm invocations.
 // maxRetriesPerRequest: 1 prevents long hangs on connection failure in serverless.
@@ -20,29 +21,14 @@ export async function GET() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const cacheKey = `ai-analysis:${today}`;
-  const promptKey = `ai-analysis-prompt:${today}`;
-
   try {
-    const cached = await redis.get(cacheKey);
-    if (!cached) {
-      return Response.json(
-        { error: "No analysis found for today yet." },
-        { status: 404 }
-      );
-    }
-
-    const result = JSON.parse(cached);
-
-    // Prompt is stored on its own key by the worker (not duplicated inside the
-    // analysis object) — merge it in for the "view prompt" UI, but don't fail the
-    // whole response if this secondary lookup has trouble.
-    try {
-      const prompt = await redis.get(promptKey);
-      if (prompt) result.prompt = prompt;
-    } catch {
-      // ignore — prompt display is a nice-to-have, not required
+    const result = await latestCached(
+      redis,
+      (date) => [`ai-analysis:${date}`],
+      (date) => `ai-analysis-prompt:${date}`,
+    );
+    if (!result) {
+      return Response.json({ error: "No analysis found in the last few days." }, { status: 404 });
     }
 
     return Response.json(result);

@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import { latestCached } from "@/lib/latestCached";
 
 // Single Redis client reused across warm invocations.
 const redis = process.env.REDIS_URL
@@ -7,11 +8,9 @@ const redis = process.env.REDIS_URL
 
 export const dynamic = "force-dynamic";
 
-// The final-synthesis step (worker/main_final.py) reconciles the signal-only analysis
-// with the news step into one favor/caution stance per ticker. It's chained
-// automatically at the end of every main_news.py run and has no cache-skip — unlike
-// ai-analysis:{date}, this key can be overwritten several times a day as the news step
-// re-runs. This route just reads whatever's there now; the client is expected to poll.
+// The final-synthesis step (worker/main_final.py) turns the signal-only analysis and
+// the news step into one favor/caution stance per ticker. It is chained at the end of
+// main_news.py, which runs once a weekday at 13:00 UTC (20:00 Bangkok).
 export async function GET() {
   if (!redis) {
     return Response.json(
@@ -20,28 +19,14 @@ export async function GET() {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const cacheKey = `ai-analysis-final:${today}`;
-  const promptKey = `ai-analysis-final-prompt:${today}`;
-
   try {
-    const cached = await redis.get(cacheKey);
-    if (!cached) {
-      return Response.json(
-        { error: "No final recommendation found for today yet." },
-        { status: 404 }
-      );
-    }
-
-    const result = JSON.parse(cached);
-
-    // Prompt is stored on its own key by the worker — merge it in, but don't fail the
-    // whole response if this secondary lookup has trouble.
-    try {
-      const prompt = await redis.get(promptKey);
-      if (prompt) result.prompt = prompt;
-    } catch {
-      // ignore — prompt display is a nice-to-have, not required
+    const result = await latestCached(
+      redis,
+      (date) => [`ai-analysis-final:${date}`, `ai-analysis-final-archive:${date}`],
+      (date) => `ai-analysis-final-prompt:${date}`,
+    );
+    if (!result) {
+      return Response.json({ error: "No final recommendation found in the last few days." }, { status: 404 });
     }
 
     return Response.json(result);

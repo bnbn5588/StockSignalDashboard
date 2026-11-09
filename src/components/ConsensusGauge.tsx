@@ -10,10 +10,14 @@ import {
 import InfoTooltip from './InfoTooltip';
 
 const sgn = (n: number) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+const HORIZONS = [1, 5, 20];
 
 export default function ConsensusGauge({ allData }: { allData: AllData }) {
   const consensus = useMemo(() => marketConsensus(allData), [allData]);
-  const fwd       = useMemo(() => aggregateForwardReturns(allData), [allData]);
+  const fwd = useMemo(
+    () => HORIZONS.map(h => aggregateForwardReturns(allData, h)),
+    [allData],
+  );
 
   const total = Object.values(consensus).reduce((s, v) => s + v, 0);
   if (!total) return null;
@@ -64,13 +68,13 @@ export default function ConsensusGauge({ allData }: { allData: AllData }) {
       {/* ── Right: avg next-day return per signal ───────────────────── */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Avg next-day Δ after signal
-          <InfoTooltip text="Across all tickers and all history, what was the average price change the day after each signal type? A positive BUY average means that historically, the day after a BUY signal the price went up on average. Larger n = more reliable estimate." />
+          Avg price change after signal
+          <InfoTooltip text="Across all tickers and all history: the average price change 1, 5 and 20 trading days after each signal. If BUY and SELL averages are close, the signal does not predict returns well — this system's value is avoiding long drawdowns (see Portfolio simulation), not picking winners. n = number of BUY/SELL/HOLD days measured over 1 day." />
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-              {['Signal', 'Avg Δ', 'n signals'].map(h => (
+              {['Signal', ...HORIZONS.map(h => `${h}d`), 'n'].map(h => (
                 <th key={h} style={{ padding: '3px 6px', fontWeight: 500, fontSize: 11, color: 'var(--text-secondary)', textAlign: h === 'Signal' ? 'left' : 'right' }}>
                   {h}
                 </th>
@@ -79,15 +83,19 @@ export default function ConsensusGauge({ allData }: { allData: AllData }) {
           </thead>
           <tbody>
             {(['BUY', 'SELL', 'HOLD'] as const).map(sig => {
-              const { avg, count } = fwd[sig] ?? { avg: 0, count: 0 };
               return (
                 <tr key={sig} style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <td style={{ padding: '5px 6px', fontWeight: 700, color: SIG_COLORS[sig] }}>{sig}</td>
-                  <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 600, color: avg >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
-                    {sgn(avg)}
-                  </td>
+                  {fwd.map((f, i) => {
+                    const avg = f[sig]?.avg ?? 0;
+                    return (
+                      <td key={HORIZONS[i]} style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 600, color: avg >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
+                        {sgn(avg)}
+                      </td>
+                    );
+                  })}
                   <td style={{ padding: '5px 6px', textAlign: 'right', color: 'var(--text-secondary)' }}>
-                    {count.toLocaleString()}
+                    {(fwd[0][sig]?.count ?? 0).toLocaleString()}
                   </td>
                 </tr>
               );

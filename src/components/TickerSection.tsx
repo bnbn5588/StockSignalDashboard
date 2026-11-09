@@ -401,7 +401,7 @@ export default function TickerSection({
         },
       });
 
-      // ── Priority 4: Confidence over time (streak or API %) ────────────────
+      // ── Priority 4: Streak or agree % over time ───────────────────────────
       const confData =
         confMode === "streak" ? streaks : rows.map((r) => r.confidence);
 
@@ -412,7 +412,7 @@ export default function TickerSection({
           datasets: [
             {
               label:
-                confMode === "streak" ? "Streak (days)" : "API Confidence (%)",
+                confMode === "streak" ? "Streak (days)" : "Agree (%)",
               data: confData,
               backgroundColor: rows.map((r) => SIG_COLORS[r.signal] + "AA"),
               borderColor: rows.map((r) => SIG_COLORS[r.signal]),
@@ -645,7 +645,7 @@ export default function TickerSection({
         <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
           Price &amp; signals
         </span>
-        <InfoTooltip text="Blue line = closing price. Coloured dots mark each day's signal: green circle = BUY, red triangle = SELL, gray square = HOLD. Dot size grows with streak length — a larger dot means the algorithm has held the same signal for more consecutive days (higher confidence)." />
+        <InfoTooltip text="Blue line = closing price. Coloured dots mark each day's signal: green circle = BUY, red triangle = SELL, gray square = HOLD. Dot size grows with streak length — a larger dot means the same signal has held for more consecutive days (a longer-lasting trend, not a more accurate one)." />
       </div>
       <div style={{ position: "relative", width: "100%", height: 320 }}>
         <canvas
@@ -689,9 +689,9 @@ export default function TickerSection({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              Confidence over time
+              Streak &amp; agreement over time
             </span>
-            <InfoTooltip text="Two views — toggle between them. Streak: bar height = consecutive days the algorithm has held the same signal; resets to 1 on every signal change. API %: bar height = the confidence score (0–100%) returned by the analysis API for that day — the algorithm's own certainty measure. The bot sends urgent alerts when confidence ≥ 70%." />
+            <InfoTooltip text="Two views — toggle between them. Streak: bar height = consecutive days the algorithm has held the same signal; resets to 1 on every signal change. Agree %: bar height = how many of the engine's 5 trend checks agreed that day (20 = 3 of 5, 60 = 4 of 5, 100 = all 5) — how clear the trend was, not a win probability." />
           </div>
           <div style={{ display: "flex", gap: 4 }}>
             {(["streak", "api"] as const).map((mode) => (
@@ -714,42 +714,11 @@ export default function TickerSection({
                   transition: "all 0.15s",
                 }}
               >
-                {mode === "streak" ? "Streak ×d" : "API %"}
+                {mode === "streak" ? "Streak ×d" : "Agree %"}
               </button>
             ))}
           </div>
         </div>
-        {confMode === "api" && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 6,
-            }}
-          >
-            <div
-              style={{ flex: 1, height: 1, background: "var(--border-color)" }}
-            />
-            <span
-              style={{
-                fontSize: 10,
-                color: "var(--text-secondary)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              urgent alert threshold
-            </span>
-            <div
-              style={{ flex: 1, height: 1, borderTop: "1px dashed #D85A3088" }}
-            />
-            <span
-              style={{ fontSize: 10, color: SIG_COLORS.SELL, fontWeight: 600 }}
-            >
-              70%
-            </span>
-          </div>
-        )}
         <div style={{ position: "relative", width: "100%", height: 120 }}>
           <canvas ref={confRef} />
         </div>

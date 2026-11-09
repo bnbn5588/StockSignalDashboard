@@ -8,11 +8,11 @@ A live Next.js dashboard that reads buy/sell/hold signals from a public Google S
 
 | Section | What it shows |
 |---|---|
-| **Today's snapshot** | Latest signal, price, day change, period return, and streak for every ticker |
-| **High-confidence alerts** | Chips for tickers on a streak of 5+ consecutive same-signal days |
-| **Market pulse** | Current BUY/SELL/HOLD split across all tickers + avg next-day return per signal type (historical) |
-| **AI Analysis** | Claude-generated market summary, top picks, and risk watch — generated once per day after 08:30 AM, shared across all visitors via server-side cache |
-| **Ticker deep-dive** | Price chart with signal markers sized by streak, monthly signal distribution, confidence-over-time bar chart (streak mode or API % mode) |
+| **Today's calls** (top of the page) | Final Recommendation (favor/caution per ticker, as sent to the LINE OA), then the AI Analysis (market summary, rule-selected top picks with a clean/weak trend tag, risk watch with each ticker's real signal) and Recent News (effect on the signal, linked headlines). Analysis at 08:15, news + final at 20:00 Bangkok, weekdays |
+| **Today's snapshot** | Latest signal, price, day change, period return, streak, agree %, ADX, trend (regime + DI) and days to the next earnings report (⚠ within 7 days) for every ticker |
+| **Long-running streaks** | Chips for tickers on a streak of 5+ consecutive same-signal days (how long the trend has held — not a confidence measure) |
+| **Market pulse** | Current BUY/SELL/HOLD split across all tickers + avg price change 1, 5 and 20 trading days after each signal type (historical) |
+| **Ticker deep-dive** | Price chart with signal markers sized by streak, monthly signal distribution, streak / agree % over time |
 | **Simulated P&L** | $10k strategy (follow BUY/SELL signals) vs buy-and-hold, per ticker |
 | **Trade performance** | Win rate, avg win/loss, expectancy, max drawdown, avg hold duration, open position banner, full trade log table |
 | **Market heatmap** | Dominant signal per ticker per month — spot macro regime shifts at a glance |
@@ -107,24 +107,26 @@ today — a plain `redis.get`, no Anthropic SDK, no API key.
 
 | Key | Contents |
 |---|---|
-| `ai-analysis:{date}` | `generatedAt`, `marketSummary`, `topPicks`, `riskWatch`, `portfolioNote`, `model`, `fetchedAt`, `tokenUsage` |
+| `ai-analysis:{date}` | `generatedAt`, `marketSummary`, `topPicks`, `riskWatch`, `portfolioNote`, `selection` (rule hits per selected ticker — drives the clean/weak tag), `model`, `fetchedAt`, `tokenUsage` |
 | `ai-analysis-prompt:{date}` | The prompt string the worker sent to Claude — merged into the API response as `prompt` for the "view prompt" UI |
-| `ai-analysis-news:{date}` | `generatedAt`, `newsHighlights` (`ticker`, `summary`, `source`, `publishedDate`, `recommendation`), `model`, `fetchedAt`, `tokenUsage` — read via a separate route, `GET /api/ai-analysis-news` |
+| `ai-analysis-news:{date}` | `generatedAt`, `newsHighlights` (`ticker`, `summary`, `effect`, `materiality`, `source`, `publishedDate`, `recommendation`, `headlines` with `title`/`publisher`/`published`/`url`), `model`, `fetchedAt`, `tokenUsage` — read via a separate route, `GET /api/ai-analysis-news` |
 | `ai-analysis-news-prompt:{date}` | The news-only prompt string — merged into that route's response as `prompt` |
 | `ai-analysis-final:{date}` | `generatedAt`, `summary`, `recommendations` (`ticker`, `stance`: `"favor"` \| `"caution"`, `reason`), `model`, `fetchedAt`, `tokenUsage` — read via `GET /api/ai-analysis-final` |
 | `ai-analysis-final-prompt:{date}` | The final-synthesis prompt string — merged into that route's response as `prompt` |
+| `ai-analysis-final-archive:{date}` | Permanent copy of the final result — the fallback once the 25h key has expired (e.g. over a weekend) |
 
 `tokenUsage` (input/output/thinking/cache tokens + `totalCostUsd`) is surfaced in the UI behind a "View token usage" toggle. `totalCostUsd` is shown as an equivalent pay-per-token reference figure only — the worker bills against a Claude subscription, not per call.
 
-`ai-analysis:{date}` uses a UTC date (`YYYY-MM-DD`) and a 25h TTL, written once daily by
-the worker's `main.py`. The route does no day-of-week or time-of-day gating of its own —
-it purely reflects whether today's key exists: if it doesn't (worker hasn't run, or
-failed, or it's a non-trading day the worker skipped), the route returns a 404 with an
-explanatory message rather than generating anything itself.
+Keys are named by the UTC date the worker ran on (analysis 01:15 UTC, news + final
+13:00 UTC, weekdays) and expire after 25h. Each route returns the **newest** key from the
+last 5 days (`src/lib/latestCached.ts`), not only today's — looking up only today's UTC
+date left the news and final cards empty from 07:00 to 20:00 Bangkok every day and over
+weekends. Each card shows when its result was generated, so an older one is never
+mistaken for today's. If nothing exists in that window the route returns a 404.
 
 - **Cache invalidation is disabled** — the `/api/ai-analysis/invalidate` endpoint returns 405. Deleting the Redis key wouldn't trigger a new analysis anyway, since this app has no way to generate one — it would just make the dashboard show "no data" until the worker's next scheduled run.
 - **The Refresh button** re-fetches `/api/ai-analysis`, `/api/ai-analysis-news`, and `/api/ai-analysis-final`, i.e. re-reads Redis — there is no scenario in which using this dashboard causes a Claude call.
-- **No client-side polling.** All three keys are fetched once on mount. Recent News and Final Recommendation have no cache-skip on the worker side and do get overwritten as the news step re-runs, but on the order of hours (not seconds or minutes) — so a page reload or the Refresh button is the intended way to pick up a newer version, not a live-updating widget.
+- **No client-side polling.** All three keys are fetched once on mount; each is written once a weekday, so a page reload or the Refresh button is enough.
 
 ### Recent News and Final Recommendation cards
 
@@ -133,51 +135,40 @@ flagged in `topPicks`/`riskWatch`, on its own independent schedule (see the work
 README) — and a successful run automatically chains into `worker/main_final.py`, which
 reconciles the quant signal and the news finding into one `favor`/`caution` stance per
 ticker. In [AIInsights.tsx](src/components/AIInsights.tsx) both render as their own
-separate cards ("Recent News", "Final Recommendation") below the AI Analysis card,
-rather than being nested inside it:
+separate cards — Final Recommendation first (it is the day's bottom line), then AI
+Analysis, then Recent News:
 
 - **All three cards are fully decoupled.** Each has its own fetch lifecycle. Recent News
   and Final Recommendation render as soon as they have data — even if the AI Analysis
   card above is still loading, showing "no analysis found yet," or errored. Conversely
   AI Analysis renders fine with neither of the other two cards present (e.g. before the
   news step has run yet today).
-- **Badge colors need the AI Analysis data to mean anything.** Both Recent News and
-  Final Recommendation color their ticker badges by matching against that day's
-  `topPicks` (green) / `riskWatch` (orange) from the *AI Analysis* response — neither
-  step ever independently says buy or sell. Recent News just comments on whether the
-  news reinforces, tempers, or contradicts what was already flagged; Final
-  Recommendation's `favor`/`caution` stance drives its own badge color directly (favor =
-  green, caution = orange), but if the AI Analysis card hasn't loaded, ticker badges
-  that don't come from a `stance` (i.e. none, here — Final Recommendation always has its
-  own color) fall back to neutral gray rather than blocking the card from showing.
-- **Final Recommendation changes the most often of the three.** It has no cache-skip and
-  is rewritten every time the news step runs (a few times a day, not continuously) — its
-  header shows "Updated \<date, time\>" rather than the "Fetched \<date\>" / "✓ Up to
-  date" language used on the once-daily AI Analysis card, since the date alone wouldn't
-  distinguish this morning's version from an hour ago. Reload or hit Refresh to check
-  for a newer one — there's no auto-refresh.
+- **Colors.** Top-pick cards are green and risk-watch cards orange; each shows the
+  ticker's actual signal from the sheet (a risk-watch ticker can be HOLD or BUY). Recent
+  News badges follow the same green/orange by list, falling back to gray if the AI
+  Analysis hasn't loaded, and each entry says whether the news supports, is neutral to,
+  or goes against the signal (`effect`), with "major news" for `materiality: high`.
+  Final Recommendation colors by its own `stance` (favor = green, caution = orange).
 - When a card has no data at all, it renders nothing — no placeholder, no error.
 
 Like the main analysis, its prompt and token usage are viewable behind their own
 "View prompt sent for news search" / "View news token usage" toggles inside the Recent
 News card (kept separate from the main analysis's toggles since they're two independent
-Claude calls with their own cost). The news step uses `WebSearch`/`WebFetch` across
-several tool-use turns, so its token usage — and equivalent cost — is typically higher
-than the signal-only analysis.
+Claude calls with their own cost).
 
 ### Client-side behaviour
 
 | Condition | What the UI shows |
 |---|---|
-| Today's key exists in Redis | Full analysis card |
-| Today's key not yet in Redis (404) | Neutral "no analysis found for today yet" message |
+| A key from the last 5 days exists | Full card, with the time it was generated |
+| None in the last 5 days (404) | Neutral "no analysis found" message |
 | Redis unreachable / other failure | Red "AI analysis unavailable" error message |
-| Analysis is from today ≥ 08:30 AM local | "✓ Up to date" (Refresh button disabled) |
+| Analysis `generatedAt` is today's Bangkok date | "✓ Up to date" (Refresh button disabled) |
 | Analysis is from a previous day | "↻ Refresh" button shown (re-reads Redis) |
 
-The "up to date" check compares `fetchedAt` against 08:30 AM in the **user's local
-timezone** — it only controls whether the Refresh button is enabled, it does not gate
-fetching. The server has no per-client time logic and no day-of-week check.
+The "up to date" check compares the analysis date with today's date in Bangkok, and the
+countdown runs to the next weekday 08:15 Bangkok, whatever the viewer's timezone — they
+only control the Refresh button and label, not fetching.
 
 ### What the prompt contains
 
@@ -231,9 +222,9 @@ src/
     layout.tsx                # Viewport meta, global font
     globals.css               # CSS variables (light/dark), canvas touch-action
     api/sheet-data/route.ts        # Proxy API: fetches & caches the Google Sheet CSV
-    api/ai-analysis/route.ts       # Reads today's analysis from Redis — never calls Claude (see stockBot_AI_Insight)
-    api/ai-analysis-news/route.ts  # Reads today's news highlights from Redis, if the worker's experimental news step ran
-    api/ai-analysis-final/route.ts # Reads today's final favor/caution recommendations from Redis, if the worker's final-synthesis step ran
+    api/ai-analysis/route.ts       # Reads the newest analysis from Redis — never calls Claude (see stockBot_AI_Insight)
+    api/ai-analysis-news/route.ts  # Reads the newest news highlights from Redis
+    api/ai-analysis-final/route.ts # Reads the newest final favor/caution recommendations from Redis
     api/quote/route.ts             # Proxies Finnhub for a live price, cached 10s in Redis
   components/
     Dashboard.tsx             # Orchestrator: fetch, parse, layout

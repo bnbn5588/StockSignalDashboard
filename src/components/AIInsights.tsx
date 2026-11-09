@@ -1,23 +1,38 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { SIG_COLORS } from '@/lib/analytics';
+import { SIG_COLORS, bangkokToday } from '@/lib/analytics';
 import InfoTooltip from './InfoTooltip';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** True if the analysis was fetched today at or after 08:30 AM — already up to date. */
-function isAnalysisFresh(fetchedAt?: string): boolean {
-  if (!fetchedAt) return false;
-  const fetched = new Date(fetchedAt);
-  const cutoff  = new Date();
-  cutoff.setHours(8, 30, 0, 0);
-  return fetched.toDateString() === new Date().toDateString() && fetched >= cutoff;
+/** True if the analysis is today's (Bangkok date) — the worker writes it once a weekday
+ * at 08:15 Bangkok under that same date, so there's nothing newer to fetch. */
+function isAnalysisFresh(generatedAt?: string): boolean {
+  return !!generatedAt && generatedAt === bangkokToday();
 }
+
+/** Next weekday 08:15 Bangkok (01:15 UTC — Bangkok has no DST), when worker.main runs. */
+function nextAnalysisRun(): number {
+  const d = new Date();
+  d.setUTCHours(1, 15, 0, 0);
+  while (d.getTime() <= Date.now() || d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return d.getTime();
+}
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface TickerPoint { ticker: string; reason: string; }
+
+/** worker/selection.py's rule hits per selected ticker, e.g. ["weak uptrend (ADX 14 < 20)"]. */
+interface SelectionHit { ticker: string; why: string[]; }
+
+interface Headline { title: string; publisher: string; published: string; url: string; }
 
 interface TokenUsage {
   inputTokens: number;
@@ -34,6 +49,7 @@ interface AIAnalysis {
   topPicks: TickerPoint[];
   riskWatch: TickerPoint[];
   portfolioNote: string;
+  selection?: { topPicks: SelectionHit[]; riskWatch: SelectionHit[] };
   model: string;
   fetchedAt?: string;
   prompt?: string;
@@ -46,6 +62,9 @@ interface NewsHighlight {
   source: string;
   publishedDate: string;
   recommendation: string;
+  effect?: 'reinforces' | 'tempers' | 'contradicts';
+  materiality?: 'high' | 'low';
+  headlines?: Headline[];
 }
 
 interface NewsAnalysis {
@@ -96,18 +115,33 @@ function TickerBadge({ ticker, color, background, onSelect }: { ticker: string; 
   );
 }
 
-function TickerCard({ item, signal, onSelect }: { item: TickerPoint; signal: 'BUY' | 'SELL'; onSelect?: (ticker: string) => void }) {
-  const color = SIG_COLORS[signal];
+const TONE = {
+  pick: { color: SIG_COLORS.BUY, bg: 'rgba(29,158,117,0.07)', badge: 'rgba(29,158,117,0.14)' },
+  risk: { color: '#BA7517', bg: 'rgba(186,117,23,0.07)', badge: 'rgba(186,117,23,0.14)' },
+};
+
+/** A topPick or riskWatch entry. The card is colored by which list it is in; the label
+ * shows the ticker's actual signal (a riskWatch ticker can be HOLD or even BUY). */
+function TickerCard({ item, tone, signal, why, onSelect }: { item: TickerPoint; tone: 'pick' | 'risk'; signal?: string; why?: string[]; onSelect?: (ticker: string) => void }) {
+  const t = TONE[tone];
+  const tier = tone === 'pick' && why?.[0]
+    ? (why[0].startsWith('clean') ? 'clean' : why[0].startsWith('weak') ? 'weak' : null)
+    : null;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0.55rem 0.75rem', borderRadius: 8, background: signal === 'BUY' ? 'rgba(29,158,117,0.07)' : 'rgba(216,90,48,0.07)', border: `1px solid ${color}33` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <TickerBadge
-          ticker={item.ticker}
-          color={color}
-          background={signal === 'BUY' ? 'rgba(29,158,117,0.14)' : 'rgba(216,90,48,0.14)'}
-          onSelect={onSelect}
-        />
-        <span style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.75 }}>{signal}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0.55rem 0.75rem', borderRadius: 8, background: t.bg, border: `1px solid ${t.color}33` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <TickerBadge ticker={item.ticker} color={t.color} background={t.badge} onSelect={onSelect} />
+        {signal && (
+          <span style={{ fontSize: 10, fontWeight: 600, color: SIG_COLORS[signal] ?? 'var(--text-secondary)' }}>{signal}</span>
+        )}
+        {tier && (
+          <span
+            title={why?.join('; ')}
+            style={{ fontSize: 10, padding: '0 6px', borderRadius: 4, border: '1px solid var(--border-color)', color: tier === 'clean' ? SIG_COLORS.BUY : 'var(--text-secondary)' }}
+          >
+            {tier === 'clean' ? 'clean trend' : 'weak trend'}
+          </span>
+        )}
       </div>
       <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
         {item.reason}
@@ -116,13 +150,27 @@ function TickerCard({ item, signal, onSelect }: { item: TickerPoint; signal: 'BU
   );
 }
 
-function NewsCard({ item, signal, onSelect }: { item: NewsHighlight; signal?: 'BUY' | 'SELL'; onSelect?: (ticker: string) => void }) {
-  const color = signal ? SIG_COLORS[signal] : SIG_COLORS.HOLD;
-  const badgeBg = signal === 'BUY' ? 'rgba(29,158,117,0.14)' : signal === 'SELL' ? 'rgba(216,90,48,0.14)' : 'rgba(136,135,128,0.14)';
+const EFFECT_STYLE: Record<string, { label: string; color: string }> = {
+  reinforces:  { label: 'supports the signal', color: SIG_COLORS.BUY },
+  tempers:     { label: 'mixed / neutral',     color: SIG_COLORS.HOLD },
+  contradicts: { label: 'against the signal',  color: SIG_COLORS.SELL },
+};
+
+function NewsCard({ item, tone, onSelect }: { item: NewsHighlight; tone?: 'pick' | 'risk'; onSelect?: (ticker: string) => void }) {
+  const color = tone ? TONE[tone].color : SIG_COLORS.HOLD;
+  const badgeBg = tone ? TONE[tone].badge : 'rgba(136,135,128,0.14)';
+  const effect = item.effect ? EFFECT_STYLE[item.effect] : null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0.65rem 0.8rem', borderRadius: 8, background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-        <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
+          {effect && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: effect.color }}>
+              {effect.label}{item.materiality === 'high' ? ' · major news' : ''}
+            </span>
+          )}
+        </span>
         <span style={{ fontSize: 10, color: 'var(--text-secondary)', opacity: 0.65, wordBreak: 'break-word' }}>
           {item.source}{item.publishedDate ? ` · ${item.publishedDate}` : ''}
         </span>
@@ -133,6 +181,18 @@ function NewsCard({ item, signal, onSelect }: { item: NewsHighlight; signal?: 'B
       <p style={{ margin: 0, fontSize: 12, lineHeight: 1.55, color: 'var(--text-secondary)', fontStyle: 'italic', borderLeft: '2px solid var(--border-color)', paddingLeft: 8, wordBreak: 'break-word' }}>
         {item.recommendation}
       </p>
+      {item.headlines && item.headlines.length > 0 && (
+        <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {item.headlines.map(h => (
+            <li key={h.url || h.title} style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--text-secondary)' }}>
+              <a href={h.url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline', textDecorationColor: 'var(--border-color)', wordBreak: 'break-word' }}>
+                {h.title}
+              </a>
+              <span style={{ opacity: 0.6 }}> · {h.publisher ? `${h.publisher}, ` : ''}{h.published.slice(0, 10)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -253,7 +313,7 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticker: string) => void }) {
+export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect?: (ticker: string) => void; signals?: Record<string, string> }) {
   const [data, setData]                     = useState<AIAnalysis | null>(null);
   const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'no-data'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
@@ -325,23 +385,16 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
     fetchFinal();
   }, [fetchAnalysis, fetchNews, fetchFinal]);
 
-  // ── Countdown to next 08:30 AM ──────────────────────────────────────────────
+  // ── Countdown to the next analysis run ──────────────────────────────────────
 
   useEffect(() => {
-    if (!data?.fetchedAt) return;
-
-    function next8h30(): number {
-      const d = new Date();
-      d.setHours(8, 30, 0, 0);
-      if (d <= new Date()) d.setDate(d.getDate() + 1);
-      return d.getTime();
-    }
+    if (!data) return;
 
     function update() {
-      const rem = next8h30() - Date.now();
+      const rem = nextAnalysisRun() - Date.now();
       const h = Math.floor(rem / 3_600_000);
       const m = Math.floor((rem % 3_600_000) / 60_000);
-      setCacheLabel(h > 0 ? `refreshes in ${h}h ${m}m` : `refreshes in ${m}m`);
+      setCacheLabel(h > 0 ? `next update in ${h}h ${m}m` : `next update in ${m}m`);
     }
 
     update();
@@ -352,12 +405,14 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
   // Ties each news item's badge color back to why it was flagged in the AI analysis —
   // works whether or not that analysis has loaded (falls back to a neutral badge when
   // there's nothing to match against, e.g. when the news card renders on its own).
-  const tickerSignal = (ticker: string): 'BUY' | 'SELL' | undefined => {
+  const tickerTone = (ticker: string): 'pick' | 'risk' | undefined => {
     if (!data) return undefined;
-    if (data.topPicks?.some(p => p.ticker === ticker)) return 'BUY';
-    if (data.riskWatch?.some(p => p.ticker === ticker)) return 'SELL';
+    if (data.topPicks?.some(p => p.ticker === ticker)) return 'pick';
+    if (data.riskWatch?.some(p => p.ticker === ticker)) return 'risk';
     return undefined;
   };
+  const whyFor = (field: 'topPicks' | 'riskWatch', ticker: string) =>
+    data?.selection?.[field]?.find(h => h.ticker === ticker)?.why;
 
   // ── Shared button style ─────────────────────────────────────────────────────
 
@@ -397,13 +452,13 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
           <ClaudeIcon size={16} />
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>AI Analysis</span>
-          <InfoTooltip text="Insights generated by a separate scheduled worker (Claude Code, subscription-billed) from the latest signal snapshot. Generated once per day after 08:30 AM — this dashboard only reads the result from Redis, it never calls Claude itself." />
+          <InfoTooltip text="Generated by a separate scheduled worker (Claude) from the latest signal snapshot, once each weekday at 08:15 Bangkok time. The top picks and risk watch tickers are chosen by fixed rules; Claude explains them. This dashboard only reads the result, it never calls Claude itself." />
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
 
             {/* Refresh / inline confirmation */}
             {!confirmRefresh ? (
-              isAnalysisFresh(data.fetchedAt) ? (
+              isAnalysisFresh(data.generatedAt) ? (
                 <span style={{ ...btnBase, cursor: 'default', opacity: 0.4, border: '1px solid var(--border-color)', display: 'inline-block' }} title="Analysis is already up to date for today">
                   ✓ Up to date
                 </span>
@@ -427,9 +482,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
             {/* Fetch time + countdown */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
               <span style={{ fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                {data.fetchedAt
-                  ? `Fetched ${new Date(data.fetchedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-                  : `Generated ${data.generatedAt}`}
+                {data.fetchedAt ? `Generated ${fmtTime(data.fetchedAt)}` : `Generated ${data.generatedAt}`}
               </span>
               {cacheLabel && (
                 <span style={{ fontSize: 10, color: 'var(--text-secondary)', opacity: 0.6, whiteSpace: 'nowrap' }}>
@@ -455,17 +508,17 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.1rem' }}>
           {data.topPicks?.length > 0 && (
             <div>
-              <SectionLabel info="Tickers with the strongest BUY conviction — long streak, high confidence, positive expectancy, strong ADX.">Top picks</SectionLabel>
+              <SectionLabel info="BUY tickers in an uptrend (above the 200-day average, buyers leading), at most 3, picked by fixed rules. 'Clean trend' = also ADX of at least 20, agree of at least 60 and buyers clearly ahead; 'weak trend' falls short on one of those (hover the tag to see which). These are trends to follow, not forecasts.">Top picks</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.topPicks.map(p => <TickerCard key={p.ticker} item={p} signal="BUY" onSelect={onTickerSelect} />)}
+                {data.topPicks.map(p => <TickerCard key={p.ticker} item={p} tone="pick" signal={signals?.[p.ticker]} why={whyFor('topPicks', p.ticker)} onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
           {data.riskWatch?.length > 0 && (
             <div>
-              <SectionLabel info="Tickers on SELL signals, weak confidence, negative expectancy, or signal/performance contradictions.">Risk watch</SectionLabel>
+              <SectionLabel info="Up to 3 tickers to keep an eye on, picked by fixed rules: a signal change today, a fresh SELL, earnings within 7 days, an established downtrend, an unclear trend, or frequent signal flips. The label shows each ticker's actual signal — it isn't always SELL.">Risk watch</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={p} signal="SELL" onSelect={onTickerSelect} />)}
+                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={p} tone="risk" signal={signals?.[p.ticker]} why={whyFor('riskWatch', p.ticker)} onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
@@ -528,10 +581,10 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
         <ClaudeIcon size={16} />
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Recent News</span>
-        <InfoTooltip text="Follow-on web search for recent news on tickers flagged by the AI analysis's top picks / risk watch — checks whether the news reinforces, tempers, or contradicts the quant signal. Generated as a separate, experimental step and not guaranteed to run every day; can appear even if the AI Analysis card above hasn't loaded." />
+        <InfoTooltip text="Recent Yahoo Finance headlines for the top picks, risk watch and today's signal changes, read by Claude once each weekday at 20:00 Bangkok time. Each entry says whether the news supports, is neutral to, or goes against the ticker's signal, and links the articles it is based on. 'Major news' = earnings, guidance, a big rating change, deal, ruling or a 5%+ move with a stated cause." />
         {newsData.fetchedAt && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Fetched {new Date(newsData.fetchedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+            Updated {fmtTime(newsData.fetchedAt)}
           </span>
         )}
       </div>
@@ -546,7 +599,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {newsData.newsHighlights.map(n => (
-              <NewsCard key={n.ticker} item={n} signal={tickerSignal(n.ticker)} onSelect={onTickerSelect} />
+              <NewsCard key={n.ticker} item={n} tone={tickerTone(n.ticker)} onSelect={onTickerSelect} />
             ))}
           </div>
 
@@ -565,7 +618,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
               usage={newsData.tokenUsage}
               show={showNewsUsage}
               onToggle={() => setShowNewsUsage(v => !v)}
-              note="Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI with web search), not billed per call. It runs several tool-use turns, so usage is typically higher than the signal-only analysis."
+              note="Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. It reads more text (the headlines), so usage is typically higher than the signal-only analysis."
             />
           )}
         </>
@@ -581,12 +634,9 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
   );
 
   // ── Final recommendation card ───────────────────────────────────────────────
-  // Its own card, entirely independent of mainCard/newsCard's status — reconciles
-  // both into one favor/caution stance per ticker. Chained automatically at the end
-  // of every news run and has no cache-skip, so unlike the once-daily AI Analysis
-  // above, this can be rewritten a few times over the trading day (the worker's news
-  // step runs on the order of hours, not minutes) — reload the page or hit Refresh
-  // above to pick up a newer version; this component doesn't poll for one.
+  // Its own card, entirely independent of mainCard/newsCard's status — one stance per
+  // ticker from the final step, chained after the news step once a weekday. Shown
+  // first: it is the day's bottom line and what the LINE OA broadcasts.
 
   const finalCard = finalData && finalData.recommendations?.length > 0 && (
     <div style={{ padding: '1.25rem', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
@@ -595,10 +645,10 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
         <ClaudeIcon size={16} />
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Final Recommendation</span>
-        <InfoTooltip text="Reconciles the AI Analysis's quant signals with Recent News into one favor/caution stance per ticker — no new data or search, pure synthesis. Regenerated every time the news step runs (a few times a day, not continuously), so it can change intraday unlike the once-daily AI Analysis above — reload the page or use the Refresh button up top to check for a newer version." />
+        <InfoTooltip text="The day's bottom line: one stance per ticker, the same one sent to the LINE OA, updated once each weekday at 20:00 Bangkok time. Favor = trend to follow, reasonable to hold or buy; caution = avoid, reduce or wait. The stance is set by rule — favor for a top pick, caution for a risk-watch ticker, switched only by major news that goes against the signal; Claude writes the reasons. Not financial advice." />
         {finalData.fetchedAt && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Updated {new Date(finalData.fetchedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+            Updated {fmtTime(finalData.fetchedAt)}
           </span>
         )}
       </div>
@@ -609,7 +659,7 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
       </p>
 
       <CollapsibleHeader
-        title={`${finalData.recommendations.length} ticker${finalData.recommendations.length === 1 ? '' : 's'} reconciled`}
+        title={`${finalData.recommendations.length} ticker${finalData.recommendations.length === 1 ? '' : 's'}`}
         expanded={finalExpanded}
         onToggle={() => setFinalExpanded(v => !v)}
       />
@@ -654,9 +704,9 @@ export default function AIInsights({ onTickerSelect }: { onTickerSelect?: (ticke
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {finalCard}
       {mainCard}
       {newsCard}
-      {finalCard}
     </div>
   );
 }

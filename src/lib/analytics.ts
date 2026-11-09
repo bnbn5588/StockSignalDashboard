@@ -7,6 +7,13 @@ export type Row = {
   strength: string;    // col 3: Weak | Moderate | Strong | Insufficient
   confidence: number;  // col 4: 0–100 numeric (API's own certainty score)
   adx: number;         // col 5: ADX value extracted from "Strong (ADX: 60.63)"
+  // v2 columns (I–O) — absent on rows written before the v2 engine
+  regime?: string;     // col 8: UP | DOWN (price vs 200-day average)
+  rsi?: number;        // col 9
+  plusDi?: number;     // col 10: +DI
+  minusDi?: number;    // col 11: -DI
+  sma200?: number;     // col 12
+  earnings?: string;   // col 14: next earnings date (YYYY-MM-DD) as known that day
 };
 export type AllData = Record<string, Row[]>;
 
@@ -28,6 +35,8 @@ export const SIG_COLORS: Record<string, string> = {
 // Col 4 = confidence % (numeric string, e.g. "47.4")
 // Col 5 = trend strength string (e.g. "Strong (ADX: 60.63)")
 // Col 6 = price with $-prefix
+// v2 rows add: col 7 engine, 8 regime, 9 RSI, 10 +DI, 11 -DI, 12 SMA200,
+// 13 generated_at, 14 next earnings date (blank when unknown)
 //
 // The bot can write the same trading day more than once — a scheduled run followed by
 // a manual rerun (e.g. after the scheduled run hit a stale/failed data fetch) — and the
@@ -65,12 +74,21 @@ export function parseCSV(csv: string): AllData {
     const adxMatch   = p[5].trim().match(/ADX:\s*([\d.]+)/);
     const adx        = adxMatch ? parseFloat(adxMatch[1]) : 0;
     const price      = parseFloat(p[6].trim().replace(/[$,]/g, ''));
+    const num = (i: number) => {
+      const v = parseFloat((p[i] ?? '').trim());
+      return isNaN(v) ? undefined : v;
+    };
+    const str = (i: number) => (p[i] ?? '').trim() || undefined;
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     if (!ticker || !signal || isNaN(price) || price <= 0) continue;
 
     // Map.set on an existing key overwrites in place — later rows in file order win.
-    byKey.set(`${date}|${ticker}`, { ticker, date, signal, price, strength, confidence, adx });
+    byKey.set(`${date}|${ticker}`, {
+      ticker, date, signal, price, strength, confidence, adx,
+      regime: str(8), rsi: num(9), plusDi: num(10), minusDi: num(11), sma200: num(12),
+      earnings: /^\d{4}-\d{2}-\d{2}$/.test(str(14) ?? '') ? str(14) : undefined,
+    });
   }
 
   const data: AllData = {};
@@ -367,14 +385,15 @@ export interface ForwardReturn { avg: number; count: number; }
  * For each signal type, what was the average next-trading-day price change?
  * Aggregated across all tickers — the larger the n, the more reliable the avg.
  */
-export function aggregateForwardReturns(allData: AllData): Record<string, ForwardReturn> {
+/** Average % price change `horizon` trading days (rows) after each signal. */
+export function aggregateForwardReturns(allData: AllData, horizon = 1): Record<string, ForwardReturn> {
   const sums: Record<string, number> = { BUY: 0, SELL: 0, HOLD: 0 };
   const counts: Record<string, number> = { BUY: 0, SELL: 0, HOLD: 0 };
   for (const rows of Object.values(allData)) {
-    for (let i = 0; i < rows.length - 1; i++) {
+    for (let i = 0; i < rows.length - horizon; i++) {
       const sig = rows[i].signal;
       if (sig in sums) {
-        sums[sig] += ((rows[i + 1].price - rows[i].price) / rows[i].price) * 100;
+        sums[sig] += ((rows[i + horizon].price - rows[i].price) / rows[i].price) * 100;
         counts[sig]++;
       }
     }
@@ -434,4 +453,17 @@ export function portfolioSimulation(allData: AllData): PnLPoint[] {
     if (count) result.push({ date, strategy: sumS / count, bah: sumB / count });
   }
   return result;
+}
+
+// ── Earnings ──────────────────────────────────────────────────────────────────
+
+/** Calendar days from `today` (YYYY-MM-DD) to the row's next earnings date, or null. */
+export function earningsDays(row: Row | undefined, today: string): number | null {
+  if (!row?.earnings) return null;
+  return Math.round((Date.parse(row.earnings) - Date.parse(today)) / 86_400_000);
+}
+
+/** Today's date in Bangkok (the worker and bot schedules are set in Thai time). */
+export function bangkokToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
 }
