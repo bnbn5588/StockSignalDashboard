@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SIG_COLORS, bangkokToday } from '@/lib/analytics';
 import InfoTooltip from './InfoTooltip';
+import Term from './Term';
+import { useLang, useT } from '@/lib/i18n';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,8 +24,8 @@ function nextAnalysisRun(): number {
   return d.getTime();
 }
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const fmtTime = (iso: string, lang: string) =>
+  new Date(iso).toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,8 @@ interface AIAnalysis {
   riskWatch: TickerPoint[];
   portfolioNote: string;
   selection?: { topPicks: SelectionHit[]; riskWatch: SelectionHit[] };
+  /** Thai versions of the model-written text (worker/translate.py); absent if translation failed. */
+  th?: { marketSummary: string; portfolioNote: string; topPicks: Record<string, string>; riskWatch: Record<string, string> };
   model: string;
   fetchedAt?: string;
   prompt?: string;
@@ -70,6 +74,7 @@ interface NewsHighlight {
 interface NewsAnalysis {
   generatedAt: string;
   newsHighlights: NewsHighlight[];
+  th?: Record<string, { summary: string; recommendation: string }>;
   model: string;
   fetchedAt?: string;
   prompt?: string;
@@ -86,6 +91,7 @@ interface FinalAnalysis {
   generatedAt: string;
   summary: string;
   recommendations: FinalRecommendation[];
+  th?: { summary: string; recommendations: Record<string, string> };
   model: string;
   fetchedAt?: string;
   prompt?: string;
@@ -97,6 +103,7 @@ interface FinalAnalysis {
 /** Colored ticker badge — a button when onSelect is given, so clicking it can jump the
  * Ticker deep-dive section to that ticker; otherwise a plain span. */
 function TickerBadge({ ticker, color, background, onSelect }: { ticker: string; color: string; background: string; onSelect?: (ticker: string) => void }) {
+  const t = useT();
   if (!onSelect) {
     return (
       <span style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background, letterSpacing: '0.03em' }}>
@@ -107,7 +114,7 @@ function TickerBadge({ ticker, color, background, onSelect }: { ticker: string; 
   return (
     <button
       onClick={() => onSelect(ticker)}
-      title={`Jump to ${ticker} in Ticker deep-dive`}
+      title={t(`Jump to ${ticker} in Ticker deep-dive`, `ไปที่ ${ticker} ในส่วนเจาะลึก`)}
       style={{ fontSize: 12, fontWeight: 700, color, padding: '1px 7px', borderRadius: 5, background, letterSpacing: '0.03em', border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
     >
       {ticker}
@@ -123,6 +130,7 @@ const TONE = {
 /** A topPick or riskWatch entry. The card is colored by which list it is in; the label
  * shows the ticker's actual signal (a riskWatch ticker can be HOLD or even BUY). */
 function TickerCard({ item, tone, signal, why, onSelect }: { item: TickerPoint; tone: 'pick' | 'risk'; signal?: string; why?: string[]; onSelect?: (ticker: string) => void }) {
+  const tr = useT();
   const t = TONE[tone];
   const tier = tone === 'pick' && why?.[0]
     ? (why[0].startsWith('clean') ? 'clean' : why[0].startsWith('weak') ? 'weak' : null)
@@ -132,14 +140,14 @@ function TickerCard({ item, tone, signal, why, onSelect }: { item: TickerPoint; 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <TickerBadge ticker={item.ticker} color={t.color} background={t.badge} onSelect={onSelect} />
         {signal && (
-          <span style={{ fontSize: 10, fontWeight: 600, color: SIG_COLORS[signal] ?? 'var(--text-secondary)' }}>{signal}</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: SIG_COLORS[signal] ?? 'var(--text-secondary)' }}><Term id={signal}>{signal}</Term></span>
         )}
         {tier && (
           <span
             title={why?.join('; ')}
             style={{ fontSize: 10, padding: '0 6px', borderRadius: 4, border: '1px solid var(--border-color)', color: tier === 'clean' ? SIG_COLORS.BUY : 'var(--text-secondary)' }}
           >
-            {tier === 'clean' ? 'clean trend' : 'weak trend'}
+            {tier === 'clean' ? tr('clean trend', 'แนวโน้มชัด') : tr('weak trend', 'แนวโน้มอ่อน')}
           </span>
         )}
       </div>
@@ -150,16 +158,17 @@ function TickerCard({ item, tone, signal, why, onSelect }: { item: TickerPoint; 
   );
 }
 
-const EFFECT_STYLE: Record<string, { label: string; color: string }> = {
-  reinforces:  { label: 'supports the signal', color: SIG_COLORS.BUY },
-  tempers:     { label: 'mixed / neutral',     color: SIG_COLORS.HOLD },
-  contradicts: { label: 'against the signal',  color: SIG_COLORS.SELL },
+const EFFECT_STYLE: Record<string, { en: string; th: string; color: string }> = {
+  reinforces:  { en: 'supports the signal', th: 'สนับสนุนสัญญาณ',  color: SIG_COLORS.BUY },
+  tempers:     { en: 'mixed / neutral',     th: 'ก้ำกึ่ง / เป็นกลาง', color: SIG_COLORS.HOLD },
+  contradicts: { en: 'against the signal',  th: 'ขัดกับสัญญาณ',     color: SIG_COLORS.SELL },
 };
 
 function NewsCard({ item, tone, onSelect }: { item: NewsHighlight; tone?: 'pick' | 'risk'; onSelect?: (ticker: string) => void }) {
   const color = tone ? TONE[tone].color : SIG_COLORS.HOLD;
   const badgeBg = tone ? TONE[tone].badge : 'rgba(136,135,128,0.14)';
   const effect = item.effect ? EFFECT_STYLE[item.effect] : null;
+  const t = useT();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0.65rem 0.8rem', borderRadius: 8, background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -167,7 +176,7 @@ function NewsCard({ item, tone, onSelect }: { item: NewsHighlight; tone?: 'pick'
           <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
           {effect && (
             <span style={{ fontSize: 10, fontWeight: 600, color: effect.color }}>
-              {effect.label}{item.materiality === 'high' ? ' · major news' : ''}
+              {t(effect.en, effect.th)}{item.materiality === 'high' ? t(' · major news', ' · ข่าวสำคัญ') : ''}
             </span>
           )}
         </span>
@@ -206,7 +215,7 @@ function FinalCard({ item, onSelect }: { item: FinalRecommendation; onSelect?: (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <TickerBadge ticker={item.ticker} color={color} background={badgeBg} onSelect={onSelect} />
         <span style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.75, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-          {item.stance}
+          <Term id={item.stance}>{item.stance}</Term>
         </span>
       </div>
       <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
@@ -217,11 +226,12 @@ function FinalCard({ item, onSelect }: { item: FinalRecommendation; onSelect?: (
 }
 
 function PromptViewer({ label, prompt, show, onToggle }: { label: string; prompt: string; show: boolean; onToggle: () => void }) {
+  const t = useT();
   return (
     <div style={{ marginBottom: 10 }}>
       <button onClick={onToggle} style={{ background: 'none', border: 'none', padding: '4px 0', margin: '-4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}>
         <span style={{ fontSize: 9 }}>{show ? '▼' : '▶'}</span>
-        {show ? 'Hide' : 'View'} {label}
+        {show ? t('Hide', 'ซ่อน') : t('View', 'ดู')} {label}
       </button>
       {show && (
         <pre style={{ marginTop: 8, padding: '0.75rem', borderRadius: 7, background: 'var(--bg-primary)', border: '1px solid var(--border-color)', fontSize: 11, lineHeight: 1.6, color: 'var(--text-secondary)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -233,11 +243,12 @@ function PromptViewer({ label, prompt, show, onToggle }: { label: string; prompt
 }
 
 function UsageViewer({ label, usage, show, onToggle, note }: { label: string; usage: TokenUsage; show: boolean; onToggle: () => void; note: string }) {
+  const t = useT();
   return (
     <div style={{ marginBottom: 10 }}>
       <button onClick={onToggle} style={{ background: 'none', border: 'none', padding: '4px 0', margin: '-4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, width: '100%', textAlign: 'left' }}>
         <span style={{ fontSize: 9 }}>{show ? '▼' : '▶'}</span>
-        {show ? 'Hide' : 'View'} {label}
+        {show ? t('Hide', 'ซ่อน') : t('View', 'ดู')} {label}
       </button>
       {show && (
         <div style={{ marginTop: 8, padding: '0.75rem', borderRadius: 7, background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
@@ -314,6 +325,10 @@ function ClaudeIcon({ size = 15 }: { size?: number }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect?: (ticker: string) => void; signals?: Record<string, string> }) {
+  const t = useT();
+  const { lang } = useLang();
+  // Thai text from the worker when available and TH is selected; English otherwise.
+  const pick = (en: string, th?: string) => (lang === 'th' && th ? th : en);
   const [data, setData]                     = useState<AIAnalysis | null>(null);
   const [status, setStatus]                 = useState<'loading' | 'error' | 'ok' | 'no-data'>('loading');
   const [errMsg, setErrMsg]                 = useState('');
@@ -394,7 +409,7 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
       const rem = nextAnalysisRun() - Date.now();
       const h = Math.floor(rem / 3_600_000);
       const m = Math.floor((rem % 3_600_000) / 60_000);
-      setCacheLabel(h > 0 ? `next update in ${h}h ${m}m` : `next update in ${m}m`);
+      setCacheLabel(h > 0 ? `${h}h ${m}m` : `${m}m`);
     }
 
     update();
@@ -434,14 +449,14 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
     mainCard = (
       <div style={{ padding: '0.9rem 1rem', borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
         <ClaudeIcon size={14} />
-        <span>{errMsg || 'No AI analysis found for today yet — check back shortly.'}</span>
+        <span>{t('No AI analysis found yet — check back shortly.', 'ยังไม่มีบทวิเคราะห์ AI — ลองกลับมาดูใหม่อีกครั้ง')}</span>
       </div>
     );
   } else if (status === 'error') {
     mainCard = (
       <div style={{ padding: '0.9rem 1rem', borderRadius: 8, background: 'rgba(216,90,48,0.06)', border: '1px solid rgba(216,90,48,0.25)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <ClaudeIcon size={14} />
-        <span><strong style={{ color: '#D85A30' }}>AI analysis unavailable</strong>{' — '}{errMsg}</span>
+        <span><strong style={{ color: '#D85A30' }}>{t('AI analysis unavailable', 'ไม่สามารถโหลดบทวิเคราะห์ AI')}</strong>{' — '}{errMsg}</span>
       </div>
     );
   } else if (data) {
@@ -451,42 +466,45 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         {/* Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
           <ClaudeIcon size={16} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>AI Analysis</span>
-          <InfoTooltip text="Generated by a separate scheduled worker (Claude) from the latest signal snapshot, once each weekday at 08:15 Bangkok time. The top picks and risk watch tickers are chosen by fixed rules; Claude explains them. This dashboard only reads the result, it never calls Claude itself." />
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{t('AI Analysis', 'บทวิเคราะห์ AI')}</span>
+          <InfoTooltip text={t(
+            'Generated by a separate scheduled worker (Claude) from the latest signal snapshot, once each weekday at 08:15 Bangkok time. The top picks and risk watch tickers are chosen by fixed rules; Claude explains them. This dashboard only reads the result, it never calls Claude itself.',
+            'สร้างโดยระบบอัตโนมัติ (Claude) จากสัญญาณล่าสุด ทุกวันทำการเวลา 08:15 (เวลาไทย) หุ้นใน top picks และ risk watch เลือกด้วยกฎที่ตายตัว Claude เป็นผู้อธิบายเหตุผล หน้านี้แค่อ่านผลมาแสดง ไม่ได้เรียก Claude เอง',
+          )} />
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
 
             {/* Refresh / inline confirmation */}
             {!confirmRefresh ? (
               isAnalysisFresh(data.generatedAt) ? (
-                <span style={{ ...btnBase, cursor: 'default', opacity: 0.4, border: '1px solid var(--border-color)', display: 'inline-block' }} title="Analysis is already up to date for today">
-                  ✓ Up to date
+                <span style={{ ...btnBase, cursor: 'default', opacity: 0.4, border: '1px solid var(--border-color)', display: 'inline-block' }} title={t('Analysis is already up to date for today', 'บทวิเคราะห์เป็นของวันนี้แล้ว')}>
+                  {t('✓ Up to date', '✓ ล่าสุดแล้ว')}
                 </span>
               ) : (
-                <button onClick={() => setConfirmRefresh(true)} style={btnBase} title="Re-fetch today's analysis from Redis. This app never calls Claude — it just re-reads whatever the worker has already written.">
-                  ↻ Refresh
+                <button onClick={() => setConfirmRefresh(true)} style={btnBase} title={t("Re-read the latest results. This app never calls Claude — it only re-reads what the worker has already written.", 'โหลดผลล่าสุดใหม่อีกครั้ง หน้านี้ไม่ได้เรียก Claude — แค่อ่านสิ่งที่ระบบเขียนไว้แล้ว')}>
+                  {t('↻ Refresh', '↻ โหลดใหม่')}
                 </button>
               )
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, flexWrap: 'wrap', maxWidth: '100%' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>
-                  Confirm refresh?
+                  {t('Confirm refresh?', 'ยืนยันโหลดใหม่?')}
                 </span>
                 <button onClick={handleRefresh} style={{ ...btnBase, color: '#1D9E75', borderColor: 'rgba(29,158,117,0.4)', fontWeight: 600 }}>
-                  Yes
+                  {t('Yes', 'ใช่')}
                 </button>
-                <button onClick={() => setConfirmRefresh(false)} style={btnBase}>Cancel</button>
+                <button onClick={() => setConfirmRefresh(false)} style={btnBase}>{t('Cancel', 'ยกเลิก')}</button>
               </div>
             )}
 
             {/* Fetch time + countdown */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
               <span style={{ fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                {data.fetchedAt ? `Generated ${fmtTime(data.fetchedAt)}` : `Generated ${data.generatedAt}`}
+                {t('Generated', 'สร้างเมื่อ')} {data.fetchedAt ? fmtTime(data.fetchedAt, lang) : data.generatedAt}
               </span>
               {cacheLabel && (
                 <span style={{ fontSize: 10, color: 'var(--text-secondary)', opacity: 0.6, whiteSpace: 'nowrap' }}>
-                  {cacheLabel}
+                  {t('next update in', 'อัปเดตถัดไปในอีก')} {cacheLabel}
                 </span>
               )}
             </div>
@@ -496,11 +514,14 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
 
         {/* Market summary */}
         <div style={{ marginBottom: '1.1rem' }}>
-          <SectionLabel info="Overview of the signal environment, signal changes since yesterday, and whether the strategy is beating buy-and-hold.">
-            Market overview
+          <SectionLabel info={t(
+            'Overview of the signal environment, signal changes since yesterday, and whether the strategy is beating buy-and-hold.',
+            'ภาพรวมของสัญญาณ, สัญญาณที่เปลี่ยนจากเมื่อวาน และกลยุทธ์ชนะการซื้อแล้วถือยาวหรือไม่',
+          )}>
+            {t('Market overview', 'ภาพรวมตลาด')}
           </SectionLabel>
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: 'var(--text-primary)' }}>
-            {data.marketSummary}
+            {pick(data.marketSummary, data.th?.marketSummary)}
           </p>
         </div>
 
@@ -508,17 +529,23 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.1rem' }}>
           {data.topPicks?.length > 0 && (
             <div>
-              <SectionLabel info="BUY tickers in an uptrend (above the 200-day average, buyers leading), at most 3, picked by fixed rules. 'Clean trend' = also ADX of at least 20, agree of at least 60 and buyers clearly ahead; 'weak trend' falls short on one of those (hover the tag to see which). These are trends to follow, not forecasts.">Top picks</SectionLabel>
+              <SectionLabel info={t(
+                "BUY tickers in an uptrend (above the 200-day average, buyers leading), at most 3, picked by fixed rules. 'Clean trend' = also ADX of at least 20, agree of at least 60 and buyers clearly ahead; 'weak trend' falls short on one of those (hover the tag to see which). These are trends to follow, not forecasts.",
+                "หุ้น BUY ที่อยู่ในแนวโน้มขาขึ้น (เหนือเส้นค่าเฉลี่ย 200 วัน และฝั่งซื้อนำ) ไม่เกิน 3 ตัว เลือกด้วยกฎที่ตายตัว 'แนวโน้มชัด' = ADX อย่างน้อย 20, agree อย่างน้อย 60 และฝั่งซื้อนำชัดเจน 'แนวโน้มอ่อน' = ขาดข้อใดข้อหนึ่ง (ชี้ที่ป้ายเพื่อดูว่าขาดข้อไหน) เป็นแนวโน้มที่ตามได้ ไม่ใช่การทำนาย",
+              )}>Top picks</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.topPicks.map(p => <TickerCard key={p.ticker} item={p} tone="pick" signal={signals?.[p.ticker]} why={whyFor('topPicks', p.ticker)} onSelect={onTickerSelect} />)}
+                {data.topPicks.map(p => <TickerCard key={p.ticker} item={{ ...p, reason: pick(p.reason, data.th?.topPicks?.[p.ticker]) }} tone="pick" signal={signals?.[p.ticker]} why={whyFor('topPicks', p.ticker)} onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
           {data.riskWatch?.length > 0 && (
             <div>
-              <SectionLabel info="Up to 3 tickers to keep an eye on, picked by fixed rules: a signal change today, a fresh SELL, earnings within 7 days, an established downtrend, an unclear trend, or frequent signal flips. The label shows each ticker's actual signal — it isn't always SELL.">Risk watch</SectionLabel>
+              <SectionLabel info={t(
+                "Up to 3 tickers to keep an eye on, picked by fixed rules: a signal change today, a fresh SELL, earnings within 7 days, an established downtrend, an unclear trend, or frequent signal flips. The label shows each ticker's actual signal — it isn't always SELL.",
+                'หุ้นที่ควรจับตาไม่เกิน 3 ตัว เลือกด้วยกฎที่ตายตัว: สัญญาณเพิ่งเปลี่ยนวันนี้, เพิ่งเป็น SELL, ใกล้ประกาศงบภายใน 7 วัน, อยู่ในขาลงชัดเจน, แนวโน้มไม่ชัด หรือสัญญาณกลับไปกลับมาบ่อย ป้ายแสดงสัญญาณจริงของหุ้นตัวนั้น — ไม่จำเป็นต้องเป็น SELL เสมอ',
+              )}>Risk watch</SectionLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={p} tone="risk" signal={signals?.[p.ticker]} why={whyFor('riskWatch', p.ticker)} onSelect={onTickerSelect} />)}
+                {data.riskWatch.map(p => <TickerCard key={p.ticker} item={{ ...p, reason: pick(p.reason, data.th?.riskWatch?.[p.ticker]) }} tone="risk" signal={signals?.[p.ticker]} why={whyFor('riskWatch', p.ticker)} onSelect={onTickerSelect} />)}
               </div>
             </div>
           )}
@@ -527,9 +554,12 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         {/* Portfolio note */}
         {data.portfolioNote && (
           <div style={{ marginBottom: '1rem' }}>
-            <SectionLabel info="Portfolio health, strategy vs buy-and-hold performance, or actionable guidance.">Portfolio note</SectionLabel>
+            <SectionLabel info={t(
+              'Portfolio health, strategy vs buy-and-hold performance, or actionable guidance.',
+              'สุขภาพของพอร์ต, ผลของกลยุทธ์เทียบกับการซื้อแล้วถือยาว หรือข้อแนะนำที่นำไปใช้ได้',
+            )}>{t('Portfolio note', 'หมายเหตุพอร์ต')}</SectionLabel>
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: 'var(--text-primary)' }}>
-              {data.portfolioNote}
+              {pick(data.portfolioNote, data.th?.portfolioNote)}
             </p>
           </div>
         )}
@@ -537,7 +567,7 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         {/* Prompt viewer */}
         {data.prompt && (
           <PromptViewer
-            label="prompt sent to Claude"
+            label={t("prompt sent to Claude", "prompt ที่ส่งให้ Claude")}
             prompt={data.prompt}
             show={showPrompt}
             onToggle={() => setShowPrompt(v => !v)}
@@ -547,18 +577,21 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         {/* Token usage viewer */}
         {data.tokenUsage && (
           <UsageViewer
-            label="token usage"
+            label={t("token usage", "การใช้ token")}
             usage={data.tokenUsage}
             show={showUsage}
             onToggle={() => setShowUsage(v => !v)}
-            note="Cost is the equivalent pay-per-token API price for reference only — this analysis was generated via a Claude subscription (Claude Code CLI), not billed per call."
+            note={t(
+              "Cost is the equivalent pay-per-token API price for reference only — this analysis was generated via a Claude subscription (Claude Code CLI), not billed per call.",
+              "ค่าใช้จ่ายนี้เป็นราคาเทียบกับ API แบบจ่ายต่อ token เพื่ออ้างอิงเท่านั้น — ระบบรันผ่าน subscription ของ Claude จึงไม่ได้ถูกเรียกเก็บเงินต่อครั้ง",
+            )}
           />
         )}
 
         {/* Footer */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-secondary)', opacity: 0.55, marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
           <ClaudeIcon size={11} />
-          <span>Powered by {data.model} · Shared cache · Not financial advice</span>
+          <span>{t('Powered by', 'สร้างโดย')} {data.model} · {t('Not financial advice', 'ไม่ใช่คำแนะนำการลงทุน')}</span>
         </div>
 
       </div>
@@ -580,17 +613,20 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
       {/* Header */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
         <ClaudeIcon size={16} />
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Recent News</span>
-        <InfoTooltip text="Recent Yahoo Finance headlines for the top picks, risk watch and today's signal changes, read by Claude once each weekday at 20:00 Bangkok time. Each entry says whether the news supports, is neutral to, or goes against the ticker's signal, and links the articles it is based on. 'Major news' = earnings, guidance, a big rating change, deal, ruling or a 5%+ move with a stated cause." />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{t('Recent News', 'ข่าวล่าสุด')}</span>
+        <InfoTooltip text={t(
+          "Recent Yahoo Finance headlines for the top picks, risk watch and today's signal changes, read by Claude once each weekday at 20:00 Bangkok time. Each entry says whether the news supports, is neutral to, or goes against the ticker's signal, and links the articles it is based on. 'Major news' = earnings, guidance, a big rating change, deal, ruling or a 5%+ move with a stated cause.",
+          "ข่าวล่าสุดจาก Yahoo Finance ของหุ้นใน top picks, risk watch และหุ้นที่สัญญาณเปลี่ยนวันนี้ Claude อ่านทุกวันทำการเวลา 20:00 (เวลาไทย) แต่ละข่าวบอกว่าสนับสนุน, เป็นกลาง หรือขัดกับสัญญาณ พร้อมลิงก์ข่าวต้นฉบับ 'ข่าวสำคัญ' = งบ, แนวทางธุรกิจ, การปรับเรตติ้งครั้งใหญ่, ดีล, คำตัดสินทางกฎหมาย หรือราคาขยับ 5% ขึ้นไปพร้อมสาเหตุ",
+        )} />
         {newsData.fetchedAt && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Updated {fmtTime(newsData.fetchedAt)}
+            {t('Updated', 'อัปเดต')} {fmtTime(newsData.fetchedAt, lang)}
           </span>
         )}
       </div>
 
       <CollapsibleHeader
-        title={`${newsData.newsHighlights.length} ticker${newsData.newsHighlights.length === 1 ? '' : 's'} flagged`}
+        title={t(`${newsData.newsHighlights.length} ticker${newsData.newsHighlights.length === 1 ? '' : 's'} with news`, `มีข่าว ${newsData.newsHighlights.length} ตัว`)}
         expanded={newsExpanded}
         onToggle={() => setNewsExpanded(v => !v)}
       />
@@ -599,13 +635,18 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {newsData.newsHighlights.map(n => (
-              <NewsCard key={n.ticker} item={n} tone={tickerTone(n.ticker)} onSelect={onTickerSelect} />
+              <NewsCard
+                key={n.ticker}
+                item={{ ...n, summary: pick(n.summary, newsData.th?.[n.ticker]?.summary), recommendation: pick(n.recommendation, newsData.th?.[n.ticker]?.recommendation) }}
+                tone={tickerTone(n.ticker)}
+                onSelect={onTickerSelect}
+              />
             ))}
           </div>
 
           {newsData.prompt && (
             <PromptViewer
-              label="prompt sent for news search"
+              label={t("prompt sent for news", "prompt ที่ใช้กับข่าว")}
               prompt={newsData.prompt}
               show={showNewsPrompt}
               onToggle={() => setShowNewsPrompt(v => !v)}
@@ -614,11 +655,14 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
 
           {newsData.tokenUsage && (
             <UsageViewer
-              label="news token usage"
+              label={t("news token usage", "การใช้ token ของข่าว")}
               usage={newsData.tokenUsage}
               show={showNewsUsage}
               onToggle={() => setShowNewsUsage(v => !v)}
-              note="Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. It reads more text (the headlines), so usage is typically higher than the signal-only analysis."
+              note={t(
+              "Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. It reads more text (the headlines), so usage is typically higher than the signal-only analysis.",
+              "ค่าใช้จ่ายนี้เป็นราคาเทียบกับ API แบบจ่ายต่อ token เพื่ออ้างอิงเท่านั้น — ระบบรันผ่าน subscription ของ Claude จึงไม่ได้ถูกเรียกเก็บเงินต่อครั้ง",
+            )}
             />
           )}
         </>
@@ -627,7 +671,7 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-secondary)', opacity: 0.55, marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
         <ClaudeIcon size={11} />
-        <span>Powered by {newsData.model} · Not financial advice</span>
+        <span>{t('Powered by', 'สร้างโดย')} {newsData.model} · {t('Not financial advice', 'ไม่ใช่คำแนะนำการลงทุน')}</span>
       </div>
 
     </div>
@@ -644,22 +688,25 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
       {/* Header */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: '1rem' }}>
         <ClaudeIcon size={16} />
-        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Final Recommendation</span>
-        <InfoTooltip text="The day's bottom line: one stance per ticker, the same one sent to the LINE OA, updated once each weekday at 20:00 Bangkok time. Favor = trend to follow, reasonable to hold or buy; caution = avoid, reduce or wait. The stance is set by rule — favor for a top pick, caution for a risk-watch ticker, switched only by major news that goes against the signal; Claude writes the reasons. Not financial advice." />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{t('Final Recommendation', 'คำแนะนำสุดท้าย')}</span>
+        <InfoTooltip text={t(
+          "The day's bottom line: one stance per ticker, the same one sent to the LINE OA, updated once each weekday at 20:00 Bangkok time. Favor = trend to follow, reasonable to hold or buy; caution = avoid, reduce or wait. The stance is set by rule — favor for a top pick, caution for a risk-watch ticker, switched only by major news that goes against the signal; Claude writes the reasons. Not financial advice.",
+          'ข้อสรุปของวัน: หนึ่งมุมมองต่อหุ้นหนึ่งตัว ตรงกับที่ส่งใน LINE OA อัปเดตทุกวันทำการเวลา 20:00 (เวลาไทย) favor = แนวโน้มน่าติดตาม ถือหรือซื้อได้อย่างสมเหตุสมผล, caution = หลีกเลี่ยง ลดสัดส่วน หรือรอดูก่อน มุมมองตั้งตามกฎ — top pick ได้ favor, risk watch ได้ caution และจะเปลี่ยนก็ต่อเมื่อมีข่าวใหญ่ที่ขัดกับสัญญาณ Claude เป็นผู้เขียนเหตุผล ไม่ใช่คำแนะนำการลงทุน',
+        )} />
         {finalData.fetchedAt && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Updated {fmtTime(finalData.fetchedAt)}
+            {t('Updated', 'อัปเดต')} {fmtTime(finalData.fetchedAt, lang)}
           </span>
         )}
       </div>
 
       {/* Summary — always visible, it's the headline takeaway */}
       <p style={{ margin: '0 0 1rem', fontSize: 13, lineHeight: 1.65, color: 'var(--text-primary)' }}>
-        {finalData.summary}
+        {pick(finalData.summary, finalData.th?.summary)}
       </p>
 
       <CollapsibleHeader
-        title={`${finalData.recommendations.length} ticker${finalData.recommendations.length === 1 ? '' : 's'}`}
+        title={t(`${finalData.recommendations.length} ticker${finalData.recommendations.length === 1 ? '' : 's'}`, `${finalData.recommendations.length} ตัว`)}
         expanded={finalExpanded}
         onToggle={() => setFinalExpanded(v => !v)}
       />
@@ -668,13 +715,13 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {finalData.recommendations.map(r => (
-              <FinalCard key={r.ticker} item={r} onSelect={onTickerSelect} />
+              <FinalCard key={r.ticker} item={{ ...r, reason: pick(r.reason, finalData.th?.recommendations?.[r.ticker]) }} onSelect={onTickerSelect} />
             ))}
           </div>
 
           {finalData.prompt && (
             <PromptViewer
-              label="prompt sent for final synthesis"
+              label={t("prompt sent for the final step", "prompt ของคำแนะนำสุดท้าย")}
               prompt={finalData.prompt}
               show={showFinalPrompt}
               onToggle={() => setShowFinalPrompt(v => !v)}
@@ -683,11 +730,14 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
 
           {finalData.tokenUsage && (
             <UsageViewer
-              label="final synthesis token usage"
+              label={t("final step token usage", "การใช้ token ของคำแนะนำสุดท้าย")}
               usage={finalData.tokenUsage}
               show={showFinalUsage}
               onToggle={() => setShowFinalUsage(v => !v)}
-              note="Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. No search or tool access, so usage is typically closer to the signal-only analysis than to the news step."
+              note={t(
+              "Cost is the equivalent pay-per-token API price for reference only — this step also runs via a Claude subscription (Claude Code CLI), not billed per call. No search or tool access, so usage is typically closer to the signal-only analysis than to the news step.",
+              "ค่าใช้จ่ายนี้เป็นราคาเทียบกับ API แบบจ่ายต่อ token เพื่ออ้างอิงเท่านั้น — ระบบรันผ่าน subscription ของ Claude จึงไม่ได้ถูกเรียกเก็บเงินต่อครั้ง",
+            )}
             />
           )}
         </>
@@ -696,7 +746,7 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: 'var(--text-secondary)', opacity: 0.55, marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
         <ClaudeIcon size={11} />
-        <span>Powered by {finalData.model} · Not financial advice</span>
+        <span>{t('Powered by', 'สร้างโดย')} {finalData.model} · {t('Not financial advice', 'ไม่ใช่คำแนะนำการลงทุน')}</span>
       </div>
 
     </div>

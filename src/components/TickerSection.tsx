@@ -11,6 +11,8 @@ import {
 import PnLChart from "./PnLChart";
 import TradeLog from "./TradeLog";
 import InfoTooltip from "./InfoTooltip";
+import Term from "./Term";
+import { useLang, useT } from "@/lib/i18n";
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -487,6 +489,9 @@ export default function TickerSection({
 
   // ── KPI values ──────────────────────────────────────────────────────────────
 
+  const t = useT();
+  const { lang } = useLang();
+
   const first = rows[0]?.price;
   const last = rows.at(-1)?.price;
   const lastDate = rows.at(-1)?.date;
@@ -554,11 +559,11 @@ export default function TickerSection({
                   flexShrink: 0,
                 }}
               />
-              {sig}
+              <Term id={sig}>{sig}</Term>
             </span>
           ))}
           <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-            (dot size = streak length)
+            {t("(dot size = streak length)", "(ขนาดจุด = ความยาว streak)")}
           </span>
         </div>
       </div>
@@ -573,7 +578,7 @@ export default function TickerSection({
         }}
       >
         <KpiCard
-          label="Signal price"
+          label={t("Signal price", "ราคาที่ใช้คำนวณสัญญาณ")}
           value={
             last != null
               ? "$" +
@@ -583,11 +588,11 @@ export default function TickerSection({
                 })
               : "—"
           }
-          sub={lastDate ? `close ${lastDate} (drives the signal)` : undefined}
+          sub={lastDate ? t(`close ${lastDate} (drives the signal)`, `ราคาปิด ${lastDate} (ใช้คำนวณสัญญาณ)`) : undefined}
         />
         {quote && (
           <KpiCard
-            label="Real-time price"
+            label={t("Real-time price", "ราคาเรียลไทม์")}
             value={
               "$" +
               quote.price.toLocaleString(undefined, {
@@ -595,12 +600,12 @@ export default function TickerSection({
                 maximumFractionDigits: 2,
               })
             }
-            sub={`${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)} (${quote.changePercent >= 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%) · as of ${new Date(quote.quotedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`}
+            sub={`${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)} (${quote.changePercent >= 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%) · ${t("as of", "ณ")} ${new Date(quote.quotedAt).toLocaleTimeString(lang === "th" ? "th-TH" : "en-US", { hour: "2-digit", minute: "2-digit" })}`}
             color={quote.change >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL}
           />
         )}
         <KpiCard
-          label="Period change"
+          label={t("Period change", "เปลี่ยนแปลงทั้งช่วง")}
           value={
             pct != null ? (parseFloat(pct) >= 0 ? "+" : "") + pct + "%" : "—"
           }
@@ -613,20 +618,20 @@ export default function TickerSection({
           }
         />
         <KpiCard
-          label="Today's signal"
+          label={t("Today's signal", "สัญญาณวันนี้")}
           value={latestSignal || "—"}
           color={SIG_COLORS[latestSignal]}
         />
-        <KpiCard label="Buy days" value={`${buyCount} days`} />
+        <KpiCard label={t("Buy days", "จำนวนวันที่เป็น BUY")} value={t(`${buyCount} days`, `${buyCount} วัน`)} />
         {/* ── Priority 5: Signal streak card ── */}
         <KpiCard
-          label="Current streak"
+          label={t("Current streak", "Streak ปัจจุบัน")}
           value={streak.signal ? `${streak.signal} ×${streak.days}d` : "—"}
           sub={
             streak.days >= 10
-              ? "High confidence"
+              ? t("Long-running trend", "แนวโน้มคงอยู่นาน")
               : streak.days >= 5
-                ? "Building"
+                ? t("Holding", "เริ่มคงที่")
                 : undefined
           }
           color={SIG_COLORS[streak.signal]}
@@ -643,9 +648,12 @@ export default function TickerSection({
         }}
       >
         <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-          Price &amp; signals
+          {t("Price & signals", "ราคาและสัญญาณ")}
         </span>
-        <InfoTooltip text="Blue line = closing price. Coloured dots mark each day's signal: green circle = BUY, red triangle = SELL, gray square = HOLD. Dot size grows with streak length — a larger dot means the same signal has held for more consecutive days (a longer-lasting trend, not a more accurate one)." />
+        <InfoTooltip text={t(
+          "Blue line = closing price. Coloured dots mark each day's signal: green circle = BUY, red triangle = SELL, gray square = HOLD. Dot size grows with streak length — a larger dot means the same signal has held for more consecutive days (a longer-lasting trend, not a more accurate one).",
+          "เส้นสีน้ำเงิน = ราคาปิด จุดสีคือสัญญาณแต่ละวัน: วงกลมเขียว = BUY, สามเหลี่ยมแดง = SELL, สี่เหลี่ยมเทา = HOLD จุดยิ่งใหญ่ = สัญญาณเดิมคงอยู่หลายวันติดกัน (แนวโน้มอยู่นาน ไม่ได้แปลว่าแม่นกว่า)",
+        )} />
       </div>
       <div style={{ position: "relative", width: "100%", height: 320 }}>
         <canvas
@@ -666,9 +674,12 @@ export default function TickerSection({
           }}
         >
           <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            Signal distribution over time
+            {t("Signal distribution over time", "การกระจายสัญญาณตามเวลา")}
           </span>
-          <InfoTooltip text="Stacked bars show how many trading days in each calendar month received a BUY (green), SELL (red), or HOLD (gray) signal. A month dominated by one color means the algorithm had strong conviction that month." />
+          <InfoTooltip text={t(
+            "Stacked bars show how many trading days in each calendar month received a BUY (green), SELL (red), or HOLD (gray) signal. A month dominated by one color means the trend stayed one way most of that month.",
+            "แท่งซ้อนแสดงจำนวนวันทำการในแต่ละเดือนที่เป็น BUY (เขียว), SELL (แดง) หรือ HOLD (เทา) เดือนที่สีเดียวเด่นแปลว่าแนวโน้มไปทางเดียวเกือบทั้งเดือน",
+          )} />
         </div>
         <div style={{ position: "relative", width: "100%", height: 140 }}>
           <canvas ref={barRef} />
@@ -689,9 +700,12 @@ export default function TickerSection({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              Streak &amp; agreement over time
+              {t("Streak & agreement over time", "Streak และ agree ตามเวลา")}
             </span>
-            <InfoTooltip text="Two views — toggle between them. Streak: bar height = consecutive days the algorithm has held the same signal; resets to 1 on every signal change. Agree %: bar height = how many of the engine's 5 trend checks agreed that day (20 = 3 of 5, 60 = 4 of 5, 100 = all 5) — how clear the trend was, not a win probability." />
+            <InfoTooltip text={t(
+              "Two views — toggle between them. Streak: bar height = consecutive days the same signal has held; resets to 1 on every signal change. Agree %: bar height = how many of the engine's 5 trend checks agreed that day (20 = 3 of 5, 60 = 4 of 5, 100 = all 5) — how clear the trend was, not a win probability.",
+              "สลับดูได้ 2 แบบ Streak: ความสูงแท่ง = จำนวนวันติดกันที่สัญญาณเหมือนเดิม เริ่มนับ 1 ใหม่ทุกครั้งที่สัญญาณเปลี่ยน Agree %: ความสูงแท่ง = จำนวนตัวชี้วัดแนวโน้ม 5 ตัวที่เห็นตรงกันในวันนั้น (20 = 3 ใน 5, 60 = 4 ใน 5, 100 = ครบ 5) — บอกว่าแนวโน้มชัดแค่ไหน ไม่ใช่โอกาสชนะ",
+            )} />
           </div>
           <div style={{ display: "flex", gap: 4 }}>
             {(["streak", "api"] as const).map((mode) => (

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { normalizeAll, allUniqueDates, SIG_COLORS, type AllData } from '@/lib/analytics';
+import { useT } from '@/lib/i18n';
 
 // Tableau-10-inspired palette, distinct on both light and dark
 const PALETTE = [
@@ -10,6 +11,7 @@ const PALETTE = [
 ];
 
 export default function NormalizedChart({ allData }: { allData: AllData }) {
+  const tr = useT(); // not `t`: tickers below are mapped as `t`
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartRef = useRef<any>(null);
@@ -129,7 +131,7 @@ export default function NormalizedChart({ allData }: { allData: AllData }) {
         <canvas ref={canvasRef} />
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
-        Each ticker indexed to 100 at its own first data point.
+        {tr('Each ticker indexed to 100 at its own first data point.', 'หุ้นแต่ละตัวเริ่มที่ 100 ณ วันแรกของข้อมูลตัวนั้น')}
       </div>
     </div>
   );

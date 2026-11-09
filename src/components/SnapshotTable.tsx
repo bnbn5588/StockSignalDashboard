@@ -12,6 +12,8 @@ import {
   type SnapshotRow,
 } from '@/lib/analytics';
 import InfoTooltip from './InfoTooltip';
+import Term from './Term';
+import { useT } from '@/lib/i18n';
 
 const SIG_BG: Record<string, string> = {
   BUY: 'rgba(29,158,117,0.08)',
@@ -64,7 +66,7 @@ function TrendCell({ row }: { row: Row }) {
   );
 }
 
-function EarningsCell({ row, today }: { row: Row; today: string }) {
+function EarningsCell({ row, today, todayLabel }: { row: Row; today: string; todayLabel: string }) {
   const d = earningsDays(row, today);
   if (d === null || d < 0 || d > 30) return <span style={{ color: 'var(--text-secondary)' }}>—</span>;
   const soon = d <= 7;
@@ -73,7 +75,7 @@ function EarningsCell({ row, today }: { row: Row; today: string }) {
       title={row.earnings}
       style={{ fontWeight: soon ? 600 : 400, color: soon ? '#BA7517' : 'var(--text-secondary)' }}
     >
-      {soon ? '⚠ ' : ''}{d === 0 ? 'today' : `${d}d`}
+      {soon ? '⚠ ' : ''}{d === 0 ? todayLabel : `${d}d`}
     </span>
   );
 }
@@ -156,6 +158,7 @@ export default function SnapshotTable({
   onTickerSelect?: (ticker: string) => void;
 }) {
   const snapshot = latestSnapshot(allData);
+  const t        = useT();
   const alerts   = highConfidenceAlerts(allData, 5);
   const today    = bangkokToday();
   const last     = (t: string) => allData[t][allData[t].length - 1];
@@ -191,14 +194,17 @@ export default function SnapshotTable({
           }}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 11, color: 'var(--text-secondary)', marginRight: 4 }}>
-            Long-running streaks:
-            <InfoTooltip text="Tickers that have kept the same signal for 5 or more trading days in a row. A long streak only means the trend hasn't changed in a while — it is not a confidence or accuracy measure (a SELL streak of 100+ days just means the stock has stayed below trend)." />
+            {t('Long-running streaks:', 'สัญญาณที่ไม่เปลี่ยนมานาน:')}
+            <InfoTooltip text={t(
+              "Tickers that have kept the same signal for 5 or more trading days in a row. A long streak only means the trend hasn't changed in a while — it is not a confidence or accuracy measure (a SELL streak of 100+ days just means the stock has stayed below trend).",
+              'หุ้นที่สัญญาณไม่เปลี่ยนติดต่อกัน 5 วันทำการขึ้นไป streak ยาวแปลว่าแนวโน้มไม่เปลี่ยนมานาน ไม่ได้บอกความมั่นใจหรือความแม่นยำ (SELL ติดกัน 100 วันขึ้นไป แค่แปลว่าหุ้นอยู่ใต้แนวโน้มมาตลอด)',
+            )} />
           </span>
           {alerts.map(a => (
             <button
               key={a.ticker}
               onClick={() => onTickerSelect?.(a.ticker)}
-              title={onTickerSelect ? `Jump to ${a.ticker} in Ticker deep-dive` : undefined}
+              title={onTickerSelect ? t(`Jump to ${a.ticker} in Ticker deep-dive`, `ไปที่ ${a.ticker} ในส่วนเจาะลึก`) : undefined}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -221,28 +227,46 @@ export default function SnapshotTable({
 
       {/* ── Snapshot table ────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>
-        Today's snapshot — all tickers
-        <InfoTooltip text="Latest available data row for each ticker. Click a sortable column header to sort. 'Day Δ' is the price change from the previous record. 'Period Δ' is the total return from the ticker's first date. 'Streak' counts consecutive same-signal days. Agree, ADX, Trend and Earnings are the figures the AI analysis below refers to." />
+        {t("Today's snapshot — all tickers", 'ภาพรวมวันนี้ — หุ้นทุกตัว')}
+        <InfoTooltip text={t(
+          "Latest available data row for each ticker. Click a sortable column header to sort. 'Day Δ' is the price change from the previous record. 'Period Δ' is the total return from the ticker's first date. 'Streak' counts consecutive same-signal days. Agree, ADX, Trend and Earnings are the figures the AI analysis refers to. Hover a signal for what it means.",
+          "ข้อมูลล่าสุดของหุ้นแต่ละตัว กดหัวคอลัมน์ที่มีลูกศรเพื่อเรียงลำดับ 'Day Δ' คือราคาเปลี่ยนจากวันก่อน 'Period Δ' คือผลตอบแทนรวมตั้งแต่วันแรกของข้อมูล 'Streak' คือจำนวนวันติดกันที่สัญญาณเหมือนเดิม ส่วน Agree, ADX, Trend และ Earnings คือตัวเลขที่บทวิเคราะห์ AI อ้างถึง ชี้ที่สัญญาณเพื่อดูความหมาย",
+        )} />
       </div>
       <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-              <SortTh label="Ticker" sortKey="ticker" align="left" {...thProps} />
-              <SortTh label="Signal" sortKey="signal" align="right" {...thProps} />
-              <SortTh label="Price" sortKey="price" align="right" {...thProps} />
+              <SortTh label={t('Ticker', 'หุ้น')} sortKey="ticker" align="left" {...thProps} />
+              <SortTh label={t('Signal', 'สัญญาณ')} sortKey="signal" align="right" {...thProps} />
+              <SortTh label={t('Price', 'ราคา')} sortKey="price" align="right" {...thProps} />
               <SortTh label="Day Δ" sortKey="dayChangePct" align="right" {...thProps} />
               <SortTh label="Period Δ" sortKey="periodChangePct" align="right" {...thProps}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
                   Period Δ
-                  <InfoTooltip text="Total return from the ticker's first record in the history sheet to its latest. Each ticker may start on a different date — the sub-line inside each cell shows the start month and number of trading days." />
+                  <InfoTooltip text={t(
+                    "Total return from the ticker's first record in the history sheet to its latest. Each ticker may start on a different date — the sub-line inside each cell shows the start month and number of trading days.",
+                    'ผลตอบแทนรวมตั้งแต่ข้อมูลแรกของหุ้นตัวนั้นถึงล่าสุด แต่ละตัวอาจเริ่มคนละวัน — บรรทัดเล็กในช่องบอกเดือนที่เริ่มและจำนวนวันทำการ',
+                  )} />
                 </span>
               </SortTh>
               <SortTh label="Streak" sortKey="streak" align="right" {...thProps} />
-              <InfoTh label="Agree" info="How many of the engine's 5 trend checks point the same way: 20 = 3 of 5, 60 = 4 of 5, 100 = all 5. It describes how clear the trend is, not a win probability." />
-              <InfoTh label="ADX" info="Trend strength, whatever the direction. Below 20 = weak or no trend, 20–25 = developing, above 25 = strong." />
-              <InfoTh label="Trend" info="UP/DOWN = price above/below its 200-day average (the long-term trend). +X/−Y = +DI vs −DI: green when buyers lead (+DI higher), red when sellers lead." />
-              <InfoTh label="Earnings" info="Days until the next earnings report (within 30 days). ⚠ = within 7 days: the price can jump either way on the report, which the trend signal cannot anticipate." />
+              <InfoTh label="Agree" info={t(
+                "How many of the engine's 5 trend checks point the same way: 20 = 3 of 5, 60 = 4 of 5, 100 = all 5. It describes how clear the trend is, not a win probability.",
+                'จำนวนตัวชี้วัดแนวโน้ม 5 ตัวที่ชี้ไปทางเดียวกัน: 20 = 3 ใน 5, 60 = 4 ใน 5, 100 = ครบ 5 บอกว่าแนวโน้มชัดแค่ไหน ไม่ใช่โอกาสชนะ',
+              )} />
+              <InfoTh label="ADX" info={t(
+                'Trend strength, whatever the direction. Below 20 = weak or no trend, 20–25 = developing, above 25 = strong.',
+                'ความแข็งแรงของแนวโน้ม ไม่สนทิศทาง ต่ำกว่า 20 = อ่อนหรือไม่มีแนวโน้ม, 20–25 = กำลังก่อตัว, เกิน 25 = แข็งแรง',
+              )} />
+              <InfoTh label={t('Trend', 'แนวโน้ม')} info={t(
+                'UP/DOWN = price above/below its 200-day average (the long-term trend). +X/−Y = +DI vs −DI: green when buyers lead (+DI higher), red when sellers lead.',
+                'UP/DOWN = ราคาอยู่เหนือ/ใต้เส้นค่าเฉลี่ย 200 วัน (แนวโน้มระยะยาว) +X/−Y = +DI เทียบ −DI: เขียวเมื่อฝั่งซื้อนำ (+DI สูงกว่า), แดงเมื่อฝั่งขายนำ',
+              )} />
+              <InfoTh label={t('Earnings', 'ประกาศงบ')} info={t(
+                'Days until the next earnings report (within 30 days). ⚠ = within 7 days: the price can jump either way on the report, which the trend signal cannot anticipate.',
+                'อีกกี่วันจะประกาศผลประกอบการ (แสดงเมื่อไม่เกิน 30 วัน) ⚠ = ภายใน 7 วัน: ราคาอาจกระโดดขึ้นหรือลงแรงในวันประกาศ ซึ่งสัญญาณแนวโน้มคาดการณ์ไม่ได้',
+              )} />
             </tr>
           </thead>
           <tbody>
@@ -250,7 +274,7 @@ export default function SnapshotTable({
               <tr
                 key={row.ticker}
                 onClick={() => onTickerSelect?.(row.ticker)}
-                title={onTickerSelect ? `Jump to ${row.ticker} in Ticker deep-dive` : undefined}
+                title={onTickerSelect ? t(`Jump to ${row.ticker} in Ticker deep-dive`, `ไปที่ ${row.ticker} ในส่วนเจาะลึก`) : undefined}
                 style={{
                   background: i % 2 === 0 ? SIG_BG[row.signal] : 'transparent',
                   borderBottom: '1px solid var(--border-color)',
@@ -259,7 +283,7 @@ export default function SnapshotTable({
               >
                 <td style={{ padding: '7px 10px', fontWeight: 600 }}>{row.ticker}</td>
                 <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600, color: SIG_COLORS[row.signal] }}>
-                  {row.signal}
+                  <Term id={row.signal}>{row.signal}</Term>
                 </td>
                 <td style={{ padding: '7px 10px', textAlign: 'right' }}>
                   ${row.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -281,7 +305,7 @@ export default function SnapshotTable({
                   {last(row.ticker).adx.toFixed(0)}
                 </td>
                 <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}><TrendCell row={last(row.ticker)} /></td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}><EarningsCell row={last(row.ticker)} today={today} /></td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}><EarningsCell row={last(row.ticker)} today={today} todayLabel={t('today', 'วันนี้')} /></td>
               </tr>
             ))}
           </tbody>

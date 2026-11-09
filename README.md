@@ -19,6 +19,14 @@ A live Next.js dashboard that reads buy/sell/hold signals from a public Google S
 | **Portfolio simulation** | Equal-weight portfolio across all tickers, signal strategy vs buy-and-hold |
 | **Relative performance** | All tickers indexed to 100 at their first date for fair cross-ticker comparison |
 
+**Thai / English.** An EN/TH switch next to the "Data as of" line changes every label and
+tooltip (`src/lib/i18n.tsx` — strings are written inline as `t('English', 'ไทย')`), and the
+AI-written text too: the worker stores a Thai version of each result in a `th` field, shown
+when TH is selected (English if it's missing). The choice is remembered per browser; a first
+visit follows the browser language. Dotted-underlined words (BUY/SELL/HOLD, favor/caution,
+hit, SPY, …) show a plain-language definition on hover or tap (`src/lib/glossary.ts`,
+`src/components/Term.tsx`).
+
 **All charts in the Ticker deep-dive section sync their tooltips** — hover a date on one chart and the others highlight the same date/month automatically. Works on both desktop (mouse) and mobile (touch).
 
 ---
@@ -107,7 +115,7 @@ today — a plain `redis.get`, no Anthropic SDK, no API key.
 
 | Key | Contents |
 |---|---|
-| `ai-analysis:{date}` | `generatedAt`, `marketSummary`, `topPicks`, `riskWatch`, `portfolioNote`, `selection` (rule hits per selected ticker — drives the clean/weak tag), `model`, `fetchedAt`, `tokenUsage` |
+| `ai-analysis:{date}` | `generatedAt`, `marketSummary`, `topPicks`, `riskWatch`, `portfolioNote`, `selection` (rule hits per selected ticker — drives the clean/weak tag), `th` (Thai text), `model`, `fetchedAt`, `tokenUsage` |
 | `ai-analysis-prompt:{date}` | The prompt string the worker sent to Claude — merged into the API response as `prompt` for the "view prompt" UI |
 | `ai-analysis-news:{date}` | `generatedAt`, `newsHighlights` (`ticker`, `summary`, `effect`, `materiality`, `source`, `publishedDate`, `recommendation`, `headlines` with `title`/`publisher`/`published`/`url`), `model`, `fetchedAt`, `tokenUsage` — read via a separate route, `GET /api/ai-analysis-news` |
 | `ai-analysis-news-prompt:{date}` | The news-only prompt string — merged into that route's response as `prompt` |

@@ -3,8 +3,10 @@
 import { useEffect, useRef } from 'react';
 import { simulatePnL, type Row } from '@/lib/analytics';
 import InfoTooltip from './InfoTooltip';
+import { useT } from '@/lib/i18n';
 
 export default function PnLChart({ rows }: { rows: Row[] }) {
+  const t = useT();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartRef = useRef<any>(null);
@@ -25,7 +27,7 @@ export default function PnLChart({ rows }: { rows: Row[] }) {
           labels: points.map(p => p.date),
           datasets: [
             {
-              label: 'Signal strategy',
+              label: t('Signal strategy', 'กลยุทธ์ตามสัญญาณ'),
               data: points.map(p => p.strategy),
               borderColor: '#1D9E75',
               backgroundColor: 'rgba(29,158,117,0.08)',
@@ -36,7 +38,7 @@ export default function PnLChart({ rows }: { rows: Row[] }) {
               order: 1,
             },
             {
-              label: 'Buy & hold',
+              label: t('Buy & hold', 'ซื้อแล้วถือยาว'),
               data: points.map(p => p.bah),
               borderColor: '#378ADD',
               borderWidth: 1.5,
@@ -89,15 +91,18 @@ export default function PnLChart({ rows }: { rows: Row[] }) {
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [rows]);
+  }, [rows, t]);
 
   if (!rows.length) return null;
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-        Simulated P&amp;L — $10,000 starting capital
-        <InfoTooltip text="Green area = hypothetical strategy that invests $10,000 on the first BUY signal and sells everything on the first SELL signal, then re-enters on the next BUY. Dashed blue = simple buy-and-hold from day one. The gap between the two lines shows whether following the signals added or destroyed value versus doing nothing. Past results do not guarantee future performance." />
+        {t('Simulated P&L — $10,000 starting capital', 'กำไรขาดทุนจำลอง — เงินต้น $10,000')}
+        <InfoTooltip text={t(
+          'Green area = hypothetical strategy that invests $10,000 on the first BUY signal and sells everything on the first SELL signal, then re-enters on the next BUY. Dashed blue = simple buy-and-hold from day one. The gap between the two lines shows whether following the signals added or destroyed value versus doing nothing. Past results do not guarantee future performance.',
+          'พื้นที่สีเขียว = กลยุทธ์สมมติที่ลงเงิน $10,000 เมื่อเกิด BUY ครั้งแรก ขายทั้งหมดเมื่อเกิด SELL แล้วกลับเข้าซื้อเมื่อ BUY ครั้งถัดไป เส้นประสีน้ำเงิน = ซื้อตั้งแต่วันแรกแล้วถือยาว ช่องว่างระหว่างสองเส้นบอกว่าการเทรดตามสัญญาณเพิ่มหรือลดมูลค่าเมื่อเทียบกับการไม่ทำอะไร ผลในอดีตไม่ได้รับประกันอนาคต',
+        )} />
       </div>
       <div style={{ position: 'relative', width: '100%', height: 200 }}>
         <canvas ref={canvasRef} />
