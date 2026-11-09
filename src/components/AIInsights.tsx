@@ -690,8 +690,8 @@ export default function AIInsights({ onTickerSelect, signals }: { onTickerSelect
         <ClaudeIcon size={16} />
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{t('Final Recommendation', 'คำแนะนำสุดท้าย')}</span>
         <InfoTooltip text={t(
-          "The day's bottom line: one stance per ticker, the same one sent to the LINE OA, updated once each weekday at 20:00 Bangkok time. Favor = trend to follow, reasonable to hold or buy; caution = avoid, reduce or wait. The stance is set by rule — favor for a top pick, caution for a risk-watch ticker, switched only by major news that goes against the signal; Claude writes the reasons. Not financial advice.",
-          'ข้อสรุปของวัน: หนึ่งมุมมองต่อหุ้นหนึ่งตัว ตรงกับที่ส่งใน LINE OA อัปเดตทุกวันทำการเวลา 20:00 (เวลาไทย) favor = แนวโน้มน่าติดตาม ถือหรือซื้อได้อย่างสมเหตุสมผล, caution = หลีกเลี่ยง ลดสัดส่วน หรือรอดูก่อน มุมมองตั้งตามกฎ — top pick ได้ favor, risk watch ได้ caution และจะเปลี่ยนก็ต่อเมื่อมีข่าวใหญ่ที่ขัดกับสัญญาณ Claude เป็นผู้เขียนเหตุผล ไม่ใช่คำแนะนำการลงทุน',
+          "The day's bottom line: one stance per ticker, the same one sent to the LINE OA, updated once each weekday at 20:00 Bangkok time. Favor = trend to follow, reasonable to hold or buy; caution = avoid, reduce or wait. The stance is set by rule — favor for a top pick, caution for a risk-watch ticker; a top pick turns to caution on major news against it, while good news never turns a risk-watch ticker to favor. Claude writes the reasons. Not financial advice.",
+          'ข้อสรุปของวัน: หนึ่งมุมมองต่อหุ้นหนึ่งตัว ตรงกับที่ส่งใน LINE OA อัปเดตทุกวันทำการเวลา 20:00 (เวลาไทย) favor = แนวโน้มน่าติดตาม ถือหรือซื้อได้อย่างสมเหตุสมผล, caution = หลีกเลี่ยง ลดสัดส่วน หรือรอดูก่อน มุมมองตั้งตามกฎ — top pick ได้ favor, risk watch ได้ caution โดย top pick จะเปลี่ยนเป็น caution เมื่อมีข่าวใหญ่ที่ขัดกับสัญญาณ แต่ข่าวดีจะไม่ทำให้หุ้นใน risk watch กลายเป็น favor Claude เป็นผู้เขียนเหตุผล ไม่ใช่คำแนะนำการลงทุน',
         )} />
         {finalData.fetchedAt && (
           <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>

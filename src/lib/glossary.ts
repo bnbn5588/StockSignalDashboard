@@ -13,12 +13,12 @@ export const GLOSSARY: Record<string, { en: string; th: string }> = {
     th: 'HOLD: แนวโน้มขาขึ้นระยะยาวยังอยู่ แต่ระยะสั้นยังไม่ชัด — ยังไม่ต้องทำอะไรเพิ่ม',
   },
   favor: {
-    en: 'favor: a trend worth following — reasonable to hold or buy. Set for a top pick unless major news goes against it.',
-    th: 'favor: แนวโน้มน่าติดตาม — ถือต่อหรือซื้อได้อย่างสมเหตุสมผล ได้เมื่อเป็น top pick เว้นแต่มีข่าวใหญ่ที่ขัดกับสัญญาณ',
+    en: 'favor: a trend worth following — reasonable to hold or buy. Given to a top pick, unless major news goes against it.',
+    th: 'favor: แนวโน้มน่าติดตาม — ถือต่อหรือซื้อได้อย่างสมเหตุสมผล ให้กับ top pick เว้นแต่มีข่าวใหญ่ที่ขัดกับสัญญาณ',
   },
   caution: {
-    en: 'caution: avoid, reduce or wait. Set for a risk-watch ticker unless major news goes against it.',
-    th: 'caution: หลีกเลี่ยง ลดสัดส่วน หรือรอดูก่อน ได้เมื่ออยู่ใน risk watch เว้นแต่มีข่าวใหญ่ที่ขัดกับสัญญาณ',
+    en: 'caution: avoid, reduce or wait. Given to every risk-watch ticker (good news alone does not override a broken trend), and to a top pick hit by major news against it.',
+    th: 'caution: หลีกเลี่ยง ลดสัดส่วน หรือรอดูก่อน ให้กับหุ้นใน risk watch ทุกตัว (ข่าวดีอย่างเดียวไม่พอจะลบล้างแนวโน้มที่เสีย) และกับ top pick ที่เจอข่าวใหญ่ซึ่งขัดกับสัญญาณ',
   },
   agree: {
     en: 'Agree: how many of the engine\'s 5 trend checks point the same way — 20 = 3 of 5, 60 = 4 of 5, 100 = all 5. How clear the trend is, not a win probability.',
