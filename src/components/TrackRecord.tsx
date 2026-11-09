@@ -33,6 +33,8 @@ const fmtX = (v: number | null | undefined) =>
 
 const cell: React.CSSProperties = { padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' };
 const head: React.CSSProperties = { ...cell, fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)' };
+// First column stays visible while the table scrolls sideways on a phone.
+const stick: React.CSSProperties = { position: 'sticky', left: 0, zIndex: 1, background: 'var(--bg-primary)' };
 
 function StatsTable({ title, groups, labels, horizons }: {
   title: string; groups: Groups; labels: string[]; horizons: number[];
@@ -45,7 +47,7 @@ function StatsTable({ title, groups, labels, horizons }: {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-              <th style={{ ...head, textAlign: 'left' }}>{t('Call', 'คำแนะนำ')}</th>
+              <th style={{ ...head, ...stick, textAlign: 'left' }}>{t('Call', 'คำแนะนำ')}</th>
               {horizons.map(h => (
                 <th key={h} style={head}>
                   {h}d <Term id="hitRate">{t('hit', 'ถูกทาง')}</Term> · {t('avg vs', 'เฉลี่ยเทียบ')} <Term id="spy">SPY</Term>
@@ -58,7 +60,7 @@ function StatsTable({ title, groups, labels, horizons }: {
               const g = groups[label];
               return (
                 <tr key={label} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                  <td style={{ ...cell, textAlign: 'left', fontWeight: 600, color: LABEL_COLORS[label] }}>
+                  <td style={{ ...cell, ...stick, textAlign: 'left', fontWeight: 600, color: LABEL_COLORS[label] }}>
                     <Term id={label}>{label}</Term>
                     <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--text-secondary)' }}>
                       {' '}({g ? g.calls : 0})

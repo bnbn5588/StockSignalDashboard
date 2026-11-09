@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { monthlySignalMap, formatMonth, SIG_COLORS, type AllData } from '@/lib/analytics';
 
 const SIG_FILL: Record<string, string> = {
@@ -13,13 +13,20 @@ const SIG_LABEL: Record<string, string> = { BUY: 'B', SELL: 'S', HOLD: 'H' };
 
 export default function HeatmapGrid({ allData }: { allData: AllData }) {
   const { tickers, months, cells } = monthlySignalMap(allData);
+  // Start scrolled to the newest months — on a phone only ~6 fit, and the latest
+  // are the ones that matter.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [months.length]);
   if (!tickers.length) return null;
 
   const cellW = 46;
   const labelW = 64;
 
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div ref={scrollRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div
         style={{
           display: 'grid',
@@ -29,7 +36,7 @@ export default function HeatmapGrid({ allData }: { allData: AllData }) {
         }}
       >
         {/* Header row */}
-        <div /> {/* corner */}
+        <div style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--bg-primary)' }} /> {/* corner */}
         {months.map(m => (
           <div
             key={m}
@@ -56,6 +63,10 @@ export default function HeatmapGrid({ allData }: { allData: AllData }) {
                 alignItems: 'center',
                 paddingRight: 6,
                 color: 'var(--text-primary)',
+                position: 'sticky',
+                left: 0,
+                zIndex: 1,
+                background: 'var(--bg-primary)',
               }}
             >
               {ticker}

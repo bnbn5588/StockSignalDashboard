@@ -1,26 +1,32 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { usePopover, popoverStyle } from '@/lib/usePopover';
 
 export default function InfoTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
+  const { anchorRef, pos, open, close, toggle } = usePopover(280);
 
   return (
     <span
-      ref={wrapRef}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      ref={anchorRef}
+      onMouseEnter={open}
+      onMouseLeave={close}
       style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle', marginLeft: 5 }}
     >
       <button
-        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
-        aria-label="Chart explanation"
+        onClick={e => { e.stopPropagation(); toggle(); }}
+        aria-label="Explanation"
+        aria-expanded={!!pos}
         style={{
+          // 15px circle, with an invisible 8px ring of extra tap area for fingers
           width: 15,
           height: 15,
+          boxSizing: 'content-box',
+          padding: 0,
+          margin: -8,
+          border: '8px solid transparent',
+          backgroundClip: 'padding-box',
           borderRadius: '50%',
-          border: '1.5px solid var(--text-secondary)',
+          boxShadow: 'inset 0 0 0 1.5px var(--text-secondary)',
           background: 'transparent',
           color: 'var(--text-secondary)',
           fontSize: 9,
@@ -32,38 +38,13 @@ export default function InfoTooltip({ text }: { text: string }) {
           alignItems: 'center',
           justifyContent: 'center',
           lineHeight: 1,
-          padding: 0,
           flexShrink: 0,
           opacity: 0.65,
-          transition: 'opacity 0.15s',
         }}
       >
         i
       </button>
-
-      {open && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'var(--bg-primary)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 8,
-            padding: '10px 13px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            color: 'var(--text-primary)',
-            width: 270,
-            zIndex: 1000,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.14)',
-            pointerEvents: 'none',
-          }}
-        >
-          {text}
-        </div>
-      )}
+      {pos && <span role="tooltip" style={popoverStyle(pos)}>{text}</span>}
     </span>
   );
 }

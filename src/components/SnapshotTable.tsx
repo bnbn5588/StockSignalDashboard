@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   latestSnapshot,
   highConfidenceAlerts,
@@ -33,6 +33,7 @@ function shortDate(d: string): string {
 }
 
 const plainTh: React.CSSProperties = {
+  borderBottom: '1px solid var(--border-color)',
   padding: '6px 10px', textAlign: 'right', fontWeight: 500, fontSize: 11,
   color: 'var(--text-secondary)', whiteSpace: 'nowrap',
 };
@@ -110,8 +111,9 @@ function sortRows(rows: SnapshotRow[], key: SortKey, dir: SortDir): SnapshotRow[
 // ── Column header ─────────────────────────────────────────────────────────────
 
 function SortTh({
-  label, sortKey: col, active, dir, align, onSort, info, children,
+  label, sortKey: col, active, dir, align, onSort, info, children, sticky,
 }: {
+  sticky?: boolean;
   label: string;
   sortKey: SortKey;
   active: SortKey;
@@ -128,6 +130,7 @@ function SortTh({
       onClick={() => onSort(col)}
       style={{
         padding: '6px 10px',
+        borderBottom: '1px solid var(--border-color)',
         textAlign: align,
         fontWeight: 500,
         fontSize: 11,
@@ -135,6 +138,7 @@ function SortTh({
         whiteSpace: 'nowrap',
         cursor: 'pointer',
         userSelect: 'none',
+        ...(sticky ? { position: 'sticky', left: 0, zIndex: 1, background: 'var(--bg-primary)' } : {}),
       }}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
@@ -162,6 +166,19 @@ export default function SnapshotTable({
   const alerts   = highConfidenceAlerts(allData, 5);
   const today    = bangkokToday();
   const last     = (t: string) => allData[t][allData[t].length - 1];
+
+  // On a phone the table is wider than the screen: show a hint until it is scrolled.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScroll, setCanScroll] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setCanScroll(el.scrollWidth > el.clientWidth + 4 && el.scrollLeft < 8);
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => { el.removeEventListener('scroll', update); window.removeEventListener('resize', update); };
+  }, [allData]);
 
   const [sortKey, setSortKey] = useState<SortKey>('ticker');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -233,11 +250,16 @@ export default function SnapshotTable({
           "ข้อมูลล่าสุดของหุ้นแต่ละตัว กดหัวคอลัมน์ที่มีลูกศรเพื่อเรียงลำดับ 'Day Δ' คือราคาเปลี่ยนจากวันก่อน 'Period Δ' คือผลตอบแทนรวมตั้งแต่วันแรกของข้อมูล 'Streak' คือจำนวนวันติดกันที่สัญญาณเหมือนเดิม ส่วน Agree, ADX, Trend และ Earnings คือตัวเลขที่บทวิเคราะห์ AI อ้างถึง ชี้ที่สัญญาณเพื่อดูความหมาย",
         )} />
       </div>
-      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      {canScroll && (
+        <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'right', marginBottom: 4 }}>
+          {t('Swipe for more columns →', 'เลื่อนดูคอลัมน์เพิ่ม →')}
+        </div>
+      )}
+      <div ref={scrollRef} style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 13 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-              <SortTh label={t('Ticker', 'หุ้น')} sortKey="ticker" align="left" {...thProps} />
+            <tr>
+              <SortTh label={t('Ticker', 'หุ้น')} sortKey="ticker" align="left" sticky {...thProps} />
               <SortTh label={t('Signal', 'สัญญาณ')} sortKey="signal" align="right" {...thProps} />
               <SortTh label={t('Price', 'ราคา')} sortKey="price" align="right" {...thProps} />
               <SortTh label="Day Δ" sortKey="dayChangePct" align="right" {...thProps} />
@@ -277,35 +299,42 @@ export default function SnapshotTable({
                 title={onTickerSelect ? t(`Jump to ${row.ticker} in Ticker deep-dive`, `ไปที่ ${row.ticker} ในส่วนเจาะลึก`) : undefined}
                 style={{
                   background: i % 2 === 0 ? SIG_BG[row.signal] : 'transparent',
-                  borderBottom: '1px solid var(--border-color)',
                   cursor: onTickerSelect ? 'pointer' : 'default',
                 }}
               >
-                <td style={{ padding: '7px 10px', fontWeight: 600 }}>{row.ticker}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600, color: SIG_COLORS[row.signal] }}>
+                <td
+                  style={{
+                    padding: '7px 10px', borderBottom: '1px solid var(--border-color)', fontWeight: 600, position: 'sticky', left: 0, zIndex: 1,
+                    // opaque, so scrolled cells don't show through; same tint as the row
+                    background: `linear-gradient(${i % 2 === 0 ? SIG_BG[row.signal] : 'transparent'}, ${i % 2 === 0 ? SIG_BG[row.signal] : 'transparent'}), var(--bg-primary)`,
+                  }}
+                >
+                  {row.ticker}
+                </td>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', fontWeight: 600, color: SIG_COLORS[row.signal] }}>
                   <Term id={row.signal}>{row.signal}</Term>
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right' }}>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right' }}>
                   ${row.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', color: row.dayChangePct >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', color: row.dayChangePct >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
                   {fmt(row.dayChangePct)}
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', color: row.periodChangePct >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', color: row.periodChangePct >= 0 ? SIG_COLORS.BUY : SIG_COLORS.SELL }}>
                   <div>{fmt(row.periodChangePct, 1)}</div>
                   <div style={{ fontSize: 10, opacity: 0.65, color: 'var(--text-secondary)' }}>
                     {shortDate(row.firstDate)} · {row.tradingDays}d
                   </div>
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', color: SIG_COLORS[row.streak.signal], fontWeight: 500 }}>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', color: SIG_COLORS[row.streak.signal], fontWeight: 500 }}>
                   {row.streak.signal}×{row.streak.days}d
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right' }}>{last(row.ticker).confidence.toFixed(0)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', color: last(row.ticker).adx < 20 ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right' }}>{last(row.ticker).confidence.toFixed(0)}</td>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', color: last(row.ticker).adx < 20 ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
                   {last(row.ticker).adx.toFixed(0)}
                 </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}><TrendCell row={last(row.ticker)} /></td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}><EarningsCell row={last(row.ticker)} today={today} todayLabel={t('today', 'วันนี้')} /></td>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', whiteSpace: 'nowrap' }}><TrendCell row={last(row.ticker)} /></td>
+                <td style={{ padding: '7px 10px', borderBottom: '1px solid var(--border-color)', textAlign: 'right', whiteSpace: 'nowrap' }}><EarningsCell row={last(row.ticker)} today={today} todayLabel={t('today', 'วันนี้')} /></td>
               </tr>
             ))}
           </tbody>
